@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <stdint.h>
 #include <cstdio>
 #include <Windows.h>
@@ -9,9 +9,10 @@
 #include <thread> 
 #include <mutex>
 #include <condition_variable> // std::condition_variable
+#include <functional>
 
-/* typedef function pointer for callback*/
-typedef bool (*func_ptr)(uint8_t* buffer, size_t size);
+/* typedef function wrapper to UIHandle callback*/
+typedef std::function<bool(uint8_t*, int)> UIHandleCb;
 
 constexpr int BUFFER_LEN = 1024;
 
@@ -34,7 +35,10 @@ private:
 	BOOL handle_closed = true;
 
 	/* read messages are stored in this message after read_port() */
-	uint8_t* read_buffer[BUFFER_LEN];
+	uint8_t read_buffer[BUFFER_LEN];
+
+	/* callback from UIHandleCb for event: new telegram to be processed*/
+	UIHandleCb callback;
 
 	/* close handle with message*/
 	void close_handle();
@@ -56,7 +60,6 @@ private:
 
 	/* task for port handling thread */
 	void connection_loop();
-	
 
 public:
 
@@ -79,6 +82,9 @@ public:
 	  Returns the number of bytes successfully read into the buffer, or -1 if
 	  there was an error reading.*/ 
 	SSIZE_T	read_port();
+
+	/* assign callback to class */
+	bool add_callback(UIHandleCb callback);
 
 	/* callback function to wait for communication events */
 	void event_callback();
