@@ -1,18 +1,5 @@
 #include "SerialCom.h"
 
-
-void SerialCom::close_handle()
-{
-    if (!handle_closed)
-    {       
-        if (!CloseHandle(port))
-            print_error("Fault when Closing main Handle");
-        handle_closed = true;
-    }
-    else
-        printf("handle already closed\n");    
-}
-
 SerialCom::SerialCom(const char* device_name, uint32_t com_speed) : device{ device_name }, baud_rate{ com_speed }, port{ nullptr } 
 {
     /* start port handling thread */
@@ -30,6 +17,25 @@ SerialCom::~SerialCom()
         event_t.join();
 
     close_handle();
+}
+
+void SerialCom::close_handle()
+{
+    if (!handle_closed)
+    {
+        if (!CloseHandle(port))
+            print_error("Fault when Closing main Handle");
+        handle_closed = true;
+    }
+    else
+        printf("handle already closed\n");
+}
+
+bool SerialCom::add_callback(UIHandleCb callback)
+{
+    /* assign to class callback*/
+    this->callback = callback;
+    return true;
 }
 
 void SerialCom::print_error(const char* context)
@@ -62,14 +68,28 @@ void SerialCom::print_timestamp(const char* tag)
 BOOL SerialCom::withdraw_buffer(SSIZE_T len)
 {
     printf("%s\n", (char*)read_buffer);
+
+    /* allocate memory for new telegram*/
+    uint8_t* credential = (uint8_t*)malloc(len);
+
+    /* copy all telegram from buffer*/
+    for (size_t i = 0; i < len; i++)
+        credential[i] = read_buffer[i];
+
+    /* forward memory to UIHandle*/
+    callback(credential, static_cast<int>(len));
+
+    /* release memory for new telegram*/
+    free(credential);
     return true;
 }
+
 BOOL SerialCom::comm_status(DWORD state)
 {
     DWORD dwModemStatus=0;
     static DWORD tmp = 0;
     
-
+    //TODO: recognize disconnection faster
     DCB com_state = { 0 };
     if (!GetCommState(port, &com_state))
     {
@@ -85,7 +105,6 @@ BOOL SerialCom::comm_status(DWORD state)
         
         //printf("correctly get comm");
     }
-
 
     {
         std::lock_guard<decltype(mtx)> lk(mtx);
@@ -448,7 +467,6 @@ SSIZE_T SerialCom::read_port()
     
     if (waiting_on_read)
     {
-
         DWORD dwRead;
         DWORD dwRes;
         dwRes = WaitForSingleObject(oRead.hEvent, READ_TIMEOUT);
