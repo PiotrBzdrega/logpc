@@ -2,6 +2,10 @@
 
 UIHandle::UIHandle()
 {
+    /* initialize domains credentials*/
+    init_dict(ui_element);
+
+    //TODO: comment
     HRESULT res = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     if SUCCEEDED(uia.CoCreateInstance(CLSID_CUIAutomation))
     {
@@ -12,7 +16,6 @@ UIHandle::UIHandle()
 
 UIHandle::~UIHandle()
 {
-
     /* stop initialization thread */
     if (init_t.joinable())
         init_t.join();
@@ -20,18 +23,131 @@ UIHandle::~UIHandle()
     /* release smart pointer*/
     uia.Release();
 
+    //TODO: comment
     CoUninitialize();
 
+    /* release domains credentials*/
     release_dict();
+}
+
+bool UIHandle::add_callback(SerialComCb callback)
+{
+    /* assign to class callback*/
+    this->callback = callback; 
+    return true;
+}
+
+bool UIHandle::process_data(uint8_t* buffer, size_t size)
+{
+    //reinterpret uint8_t* to char* is followed by convert the char* to std::string
+    std::string input(reinterpret_cast<char*>(buffer));
+
+    // Regular expression pattern to match words between commas and first digit.
+    std::regex pattern("^(\\d)(?:,(\\w+))?(?:,(\\w+))?$");
+
+
+    /* check if pattern covers input */
+    if (std::regex_match(input, pattern))
+    {
+        std::stringstream ss(input);
+        std::string word;
+
+        std::vector <std::string> telegram_part;
+        /* split words in match*/
+        while (std::getline(ss, word, ',')) 
+        {
+            printf("%s\n", word);
+            /* add new element to list */
+            telegram_part.push_back(word);            
+        }
+        
+        /* according regex pattern 0 element is a digit example: char '2' -> int 50. 50-48('0')=2*/
+        UI_ENUM mode = static_cast<UI_ENUM>(telegram_part[0][0]-'0');
+
+        switch (mode)
+        {
+        case UI_DOMAIN :
+
+            break;
+        case UI_LOGIN:
+        case UI_PASSWORD:
+
+            /* following telegram should contain 3 elements in telegram*/
+            if (telegram_part.size()==3)
+            {
+                /* enter found credential*/
+                bool res = credential(mode, telegram_part[1].c_str(), telegram_part[2].c_str());
+            }
+
+            break;
+        case UI_DONE:
+
+        case UI_NEW_CREDENTIAL:
+       
+        case UI_DELETE_ALL:
+
+        case UI_MISSED:
+
+        default:
+            break;
+        }
+
+
+    }
+
+    return false;
+}
+
+void UIHandle::finding_loop()
+{
+    /* result of function invocation*/
+    ret_url res = { nullptr,1 };
+    while (res.val)
+    {
+        /*check if message is comming */
+        {
+            std::unique_lock<decltype(mtx_msg)> lk(mtx_msg);
+
+            /* wait for mutex with timeout*/
+            if (cv_msg.wait_for(lk, std::chrono::seconds(20), [this]() {return !msg_pending; }));
+            else
+            {
+                printf("timeout for mtx_msg\n");
+                /* if timeout happened reset msg_pending */
+                msg_pending = false;
+                /* finish task if there is no response from uC*/
+                break;
+            }
+        }
+
+        /* search w/o concrete domain comparison */
+        res=find_url("");
+        /* got known domain */
+        if (res.val)
+        {
+
+            UI_ENUM element = find_element(UI_ENUM::UI_UNKNOWN, res.domain);
+            /* invoke callback with found*/
+                if (callback)
+                {
+                    callback(static_cast<uint8_t*>(res.domain),)
+                }
+            valid_elem_cb((uint8_t*)mbstring, (length) + 1, callback);
+        }
+    }
+
+    /* out of while loop, something went wrong*/
+    return initialize_instance();
 }
 
 void UIHandle::initialize_instance() 
 {
-    start this thread also in find_url
 
     while (true)
     {
         HWND child_handl = nullptr; // always nullptr
+
+        /* check if some window has className "Chrome_WidgetWin_1"*/
         hwnd = FindWindowEx(nullptr, child_handl, L"Chrome_WidgetWin_1", nullptr);
         if (!hwnd)
             return;
@@ -41,7 +157,7 @@ void UIHandle::initialize_instance()
         {
             int c = GetWindowTextLength(hwnd);
             printf("%d\n", c);
-            LPWSTR pszMem = (LPWSTR)malloc(sizeof(wchar_t) * (c+1));
+            LPWSTR pszMem = (LPWSTR)malloc(sizeof(LPWSTR) * (c+1));
             GetWindowText(hwnd, pszMem, c+1);
             wprintf(L"%s\n", pszMem);
             free(pszMem);
@@ -53,14 +169,15 @@ void UIHandle::initialize_instance()
 
         if SUCCEEDED(uia->ElementFromHandle(hwnd, &root))
         {
-            ;
+            return finding_loop();
         }
     
 }
 
-void UIHandle::valid_elem_cb(uint8_t* buffer, size_t size, bool (*func_ptr)(uint8_t*, size_t))
+void UIHandle::valid_elem_cb(uint8_t* buffer, size_t size)
 {
-    (*func_ptr)(buffer,size);
+
+    callback(buffer, size);
 }
 
 bool UIHandle::accept_credenetial()
@@ -75,8 +192,9 @@ bool UIHandle::accept_credenetial()
     return 0;
 }
 
-bool UIHandle::domain_recognition(const char* url)
+char* UIHandle::domain_recognition(const char* url,const char* req_dom)
 {
+    char* domain=nullptr;
     int first_let = 0;
     int last_let = 0;
     /*"com","net","pl","org","gov","de"
@@ -109,27 +227,45 @@ bool UIHandle::domain_recognition(const char* url)
 
             if (lookup(page))
             {
-                hit = true;
+                /* requested domain page has some characters*/
+                if (req_dom!='\0')
+                {
+                    /* compare requested domain with recognized alias of page*/
+                    if (strcmp(page, req_dom)==0)
+                    {
+                        hit = true;
+                        domain = page;
+                    };
+                }
+                else
+                {
+                    hit = true;
+                    domain = page;
+                }               
                 printf("hit hashtable\n");
             }
             else
             {
+                /* release momory if we don't have such domain in dictionary*/
+                free(page);
+                page = nullptr;
+
                 printf("miss hashtable\n");
             }
 
-
             //printf("%s\n", strcmp(page, "yandex")==0 ? "success" : "miss");
             first_found = true;
-            free(page);
-            page = nullptr;
         }
-
     }
-    return hit;
+    return domain;
 }
 
-bool UIHandle::find_url()
+ret_url UIHandle::find_url(const char* req_dom)
 {
+    constexpr ret_url ERR{ nullptr, false };
+
+    //result value (default value, not found, but correctly finished)
+    ret_url res{ nullptr,true };
     // The root window has several childs, 
     // one of them is a "pane" named "Google Chrome"
     // This contains the toolbar. Find this "Google Chrome" pane:
@@ -140,7 +276,10 @@ bool UIHandle::find_url()
 
     CComPtr<IUIAutomationElementArray> arr;
     if FAILED(root->FindAll(TreeScope_Children, pane_cond, &arr))
-        return false;
+    {
+        printf("### root cannot find correct element\n");
+        return (res=ERR);
+    }
     int count = 0;
     arr->get_Length(&count);
     printf("editable_length:%d\n", count);
@@ -151,7 +290,6 @@ bool UIHandle::find_url()
 
         if SUCCEEDED(arr->GetElement(i, &pane))
         {
-
             pane->get_CurrentClassName(&name);
             wprintf(L"%ls\n", (wchar_t*)name);
             uint8_t length = SysStringLen(name);
@@ -160,23 +298,30 @@ bool UIHandle::find_url()
                 break;
         }
         pane.Release();
-
     }
 
     if (!pane)
-        return false;
+    {
+        printf("### pointer error: pane is nullptr\n");
+        return (res = ERR);
+    }
+        
     //look for first UIA_EditControlTypeId under "Google Chrome" pane
     CComPtr<IUIAutomationElement> url;
     CComPtr<IUIAutomationCondition> url_cond;
     uia->CreatePropertyCondition(UIA_ControlTypePropertyId,
         CComVariant(UIA_EditControlTypeId), &url_cond);
     if FAILED(pane->FindFirst(TreeScope_Descendants, url_cond, &url))
-        return false;
+    {
+        printf("### pane cannot find correct element\n");
+        return (res = ERR);
+    }
+        
 
     if (!url)
     {
-        printf("### pointer error: url is nullptr  \n");
-        return false;
+        printf("### pointer error: url is nullptr\n");
+        return (res = ERR);
     }
 
     //CComPtr<IUIAutomationElementArray> url;
@@ -215,9 +360,15 @@ bool UIHandle::find_url()
     //    return false;
      //TODO: here url is null pointer when brovser is not in front or minimized (but only on first shot 😐) 
     if FAILED(url->GetCurrentPropertyValue(UIA_ValueValuePropertyId, &var))
-        return false;
+    {
+        printf("### url cannot GetCurrentPropertyValue \n");
+        return (res = ERR);
+    }
     if (!var.bstrVal)
-        return false;
+    {
+        printf("### Variant string has nullpointer\n");
+        return (res = ERR);
+    }
     wprintf(L"find_url: %s\n", var.bstrVal);
 
     int length = SysStringLen(var.bstrVal);
@@ -229,11 +380,7 @@ bool UIHandle::find_url()
     printf("%jd\n", t);
     printf("%s\n", mbstring);
 
-    bool hit = domain_recognition(mbstring);
-
-
-    /* invoke callback with found*/
-    valid_elem_cb((uint8_t*)mbstring, static_cast<size_t>(length) + 1, callback);
+    res.domain = domain_recognition(mbstring,req_dom);
 
     free(mbstring);
     //set new address ...
@@ -241,11 +388,14 @@ bool UIHandle::find_url()
     //if (FAILED(pane->GetCurrentPattern(UIA_ValuePatternId, (IUnknown**)&pattern)))
     //    return false;
     if (FAILED(url->GetCurrentPattern(UIA_ValuePatternId, (IUnknown**)&pattern)))
-        return false;
+    {
+        printf("### url cannot GetCurrentPattern \n");
+        return (res = ERR);
+    }
     //pattern->SetValue(L"google.com");
     pattern->Release();
 
-    return hit;
+    return res;
 }
 
 CComPtr<IUIAutomationElement> UIHandle::find_element(UI_ENUM ui, const char* domain)
@@ -254,7 +404,7 @@ CComPtr<IUIAutomationElement> UIHandle::find_element(UI_ENUM ui, const char* dom
     // one of them is a "pane" named "Google Chrome"
     // This contains the toolbar. Find this "Google Chrome" element:
 
-
+    
     CComPtr<IUIAutomationElement> element;
     CComPtr<IUIAutomationCondition> pane_cond;
     CComVariant var;
@@ -262,21 +412,43 @@ CComPtr<IUIAutomationElement> UIHandle::find_element(UI_ENUM ui, const char* dom
     struct nlist* map_entry = lookup(domain);
     if (!map_entry)
     {
+        //TODO: create global log function ("tag","message")
         printf("#### struct nlist* allocation error: map_entry is nullptr \n");
         return nullptr;
     }
 
-    var.bstrVal = SysAllocString(CA2W(map_entry->defn.data[ui]));
-    wprintf(L"allocated String: %ls\n", var.bstrVal);
-    var.vt = VT_BSTR;
+    /* default property for searching datafield*/
+    PROPERTYID property = UIA_AutomationIdPropertyId;
 
-    if (!var.bstrVal)
+    /* request for login field*/
+    if (ui == UI_ENUM::UI_LOGIN)
     {
-        printf("#### string allocation error: var.bstrVal is nullptr \n");
+        var.bstrVal = SysAllocString(CA2W(map_entry->defn.login));
+        wprintf(L"allocated String: %ls\n", var.bstrVal);
+        var.vt = VT_BSTR;
+
+        if (!var.bstrVal)
+        {
+            printf("#### string allocation error: var.bstrVal is nullptr \n");
+            return nullptr;
+        }
+    }
+    /* request for password field*/
+    else if (ui == UI_ENUM::UI_PASSWORD)
+    {
+        printf("password property\n");
+        var.boolVal = VARIANT_TRUE;
+        var.vt = VT_BOOL;
+        property = UIA_IsPasswordPropertyId;
+    }
+    /* wrong request*/
+    else
+    {
+        printf("#### Wrong UI_ENUM \n");
         return nullptr;
     }
 
-    res = uia->CreatePropertyCondition(UIA_AutomationIdPropertyId, var, &pane_cond);
+    res = uia->CreatePropertyCondition(property, var, &pane_cond);
     if FAILED(res)
     {
         printf("#### condition property creation error: CreatePropertyCondition() returns %08x \n", res);
@@ -284,7 +456,10 @@ CComPtr<IUIAutomationElement> UIHandle::find_element(UI_ENUM ui, const char* dom
         return nullptr;
     }
 
-    SysFreeString(var.bstrVal);
+    if (ui == UI_ENUM::UI_LOGIN)
+    {   /*release memory if has been used*/
+        SysFreeString(var.bstrVal);
+    }
 
     res = root->FindFirst(TreeScope_Descendants, pane_cond, &element);
     if FAILED(res)
@@ -306,8 +481,131 @@ CComPtr<IUIAutomationElement> UIHandle::find_element(UI_ENUM ui, const char* dom
     wprintf(L"name:%ls\n", (wchar_t*)name);
     SysFreeString(name);
 
+
     printf("%p\n", element);
     return element;
+}
+
+UI_ENUM UIHandle::which_element(const char* domain)
+{
+    // The root window has several childs, 
+    // one of them is a "pane" named "Google Chrome"
+    // This contains the toolbar. Find this "Google Chrome" element:
+    
+    UI_ENUM ret_val= UI_ENUM::UI_UNKNOWN;
+    struct nlist* map_entry = lookup(domain);
+    if (!map_entry)
+    {
+        printf("#### struct nlist* allocation error: map_entry is nullptr \n");
+        return UI_ENUM::UI_UNKNOWN;
+    }
+
+    /* currently considered field UI_ENUM*/
+    int ui;
+
+    /* search for first available field Login or Password*/
+    for ( ui= UI_ENUM::UI_LOGIN; ui <= UI_ENUM::UI_PASSWORD; ui++)
+    {
+        HRESULT res;
+        CComVariant var;
+        PROPERTYID property;
+
+        if (ui == UI_ENUM::UI_LOGIN)
+        {
+            var.bstrVal = SysAllocString(CA2W(map_entry->defn.login));
+            wprintf(L"allocated String: %ls\n", var.bstrVal);
+            var.vt = VT_BSTR;
+            property = UIA_AutomationIdPropertyId;
+
+            if (!var.bstrVal)
+            {
+                printf("#### string allocation error: var.bstrVal is nullptr \n");
+                return UI_ENUM::UI_UNKNOWN;
+            }
+        }
+        else if (ui == UI_ENUM::UI_PASSWORD)
+        {
+            printf("password property\n");
+            var.boolVal = VARIANT_TRUE;
+            var.vt = VT_BOOL;
+            property = UIA_IsPasswordPropertyId;
+        }
+
+        /* condition to find UI Element*/
+        CComPtr<IUIAutomationCondition> pane_cond;
+
+        res = uia->CreatePropertyCondition(UIA_AutomationIdPropertyId, var, &pane_cond);
+        if FAILED(res)
+        {
+            /* there is missing LOGIN field*/
+            if (ui == UI_ENUM::UI_LOGIN)
+                continue;
+
+            printf("#### condition property creation error: CreatePropertyCondition() returns %08x \n", res);
+            pane_cond.Release();
+            SysFreeString(var.bstrVal);
+            return UI_ENUM::UI_UNKNOWN;
+        }
+
+        if (ui == UI_ENUM::UI_LOGIN)
+        {   /*release memory if has been used*/
+            SysFreeString(var.bstrVal);
+        }
+
+        /* Login/Password field*/
+        CComPtr<IUIAutomationElement> element;
+
+        res = root->FindFirst(TreeScope_Descendants, pane_cond, &element);
+        if FAILED(res)
+        {
+            /* there is missing LOGIN field*/
+            if (ui == UI_ENUM::UI_LOGIN)
+                continue;
+
+            printf("#### finding error: FindFirst() returns %08x \n", res);
+            pane_cond.Release();
+            return UI_ENUM::UI_UNKNOWN;
+        }
+
+        if (!element)
+        {
+            /* there is missing LOGIN field*/
+            if (ui == UI_ENUM::UI_LOGIN)
+                continue;
+
+            printf("#### element allocation error: element is nullptr \n");
+            return UI_ENUM::UI_UNKNOWN;
+        }
+
+        pane_cond.Release();
+        CComBSTR name;
+        element->get_CurrentAutomationId(&name);
+        wprintf(L"name:%ls\n", (wchar_t*)name);
+        SysFreeString(name);
+        printf("%p\n", element);
+        element.Release();
+
+        /* check if field is filled out or empty*/
+        if FAILED(element->GetCurrentPropertyValue(UIA_ValueValuePropertyId, &var))
+            return UI_ENUM::UI_UNKNOWN;
+        if (!var.bstrVal)
+            return UI_ENUM::UI_UNKNOWN;
+
+        wprintf(L"content of field: %s\n", var.bstrVal);
+
+        /* login field is empty*/
+        if ((var.bstrVal[0] == L'\0' && ui == UI_ENUM::UI_LOGIN) ||
+            ui == UI_ENUM::UI_PASSWORD)
+        {
+            /* save found UI*/
+            ret_val = static_cast<UI_ENUM>(ui);
+            SysFreeString(var.bstrVal);
+            break;
+        }        
+        SysFreeString(var.bstrVal);
+    }
+
+    return ret_val;
 }
 
 bool UIHandle::credential(UI_ENUM ui_mode, const char* domain, const char* credential)
@@ -356,6 +654,12 @@ bool UIHandle::credential(UI_ENUM ui_mode, const char* domain, const char* crede
     IValueProvider* pattern = nullptr;
     if (FAILED(elem->GetCurrentPattern(UIA_ValuePatternId, (IUnknown**)&pattern)))
         return false;
+
+    if (!pattern)
+    {
+        printf("### pointer error: pattern is nullptr  \n");
+        return false;
+    }
 
     pattern->SetValue(w_text);
     pattern->Release();

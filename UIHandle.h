@@ -6,6 +6,9 @@
 #include <mutex>
 #include <condition_variable>
 #include "crc.h"                //hashmap
+#include <functional>
+#include <regex>
+#include <sstream>
 
 /*Telegram enumeration*/
 typedef enum UI_ENUM
@@ -20,8 +23,31 @@ typedef enum UI_ENUM
 	UI_MISSED = 6
 };
 
-/* typedef function pointer for callback*/
-typedef bool (*func_ptr)(uint8_t* buffer, size_t size);
+/* typedef function wrapper to SerialCom callback*/
+typedef std::function<bool(uint8_t*, int)> SerialComCb;
+
+/* result struct for find url function*/
+typedef struct ret_url
+{
+	char* domain;
+	bool val;
+};
+
+IUIAutomationMap ui_element[HASHSIZE] = { {"github","login_field","password"},
+								  {"etutor","login","haslo"},
+								  {"facebook","email","pass"},
+								  {"centrum24","input_nik","ordinarypin"},
+								  {"google", "identifierId", ""}, //"passwordId"},
+								  {"yandex","passp-field-login","passp-field-passwd"},
+								  {"linkedin","username","password"},
+								  {"soundcloud","sign_in_up_email","password"},
+								  {"wikipedia","wpName1","wpPassword"},
+								  {"facebook","email",""},
+								  {"quora","email","password"},
+								  {"onet","email","password"},
+								  {"wp","login","password"},
+
+};
 
 class UIHandle
 {
@@ -36,28 +62,35 @@ private:
 	/* smart pointer for Component Object Model of individual UI Element */
 	CComPtr<IUIAutomationElement> root;
 
-	/* domain recognition thread */
-	std::thread domain_t;
-
 	/* window api initialization thread  */
 	std::thread init_t;
 
 	/* mutex wait for telegram from esp*/
 	std::mutex mtx_msg;
 	std::condition_variable cv_msg;
-	bool msg_comming = false;
+	bool msg_pending = false;
 
-	/* callback for event: found valid element*/
-	func_ptr callback;
 
-	
+	/* callback from SerialCom for event: new telegram to be send*/
+	SerialComCb callback;
+
+	/* callback function for new element appears*/
+	void valid_elem_cb(uint8_t* buffer, size_t size);
+
+	/* finding url task for thread*/
+	void finding_loop();
+
+	/* initialization task for thread*/
 	void initialize_instance();
 
+	/* search for AutomationID on found domain*/
+	UI_ENUM which_element(const char* domain);
+
 	/* recognize web domain of currently opened tab in Chrome */
-	bool find_url();
+	ret_url find_url(const char* req_dom);
 
 	/* determine if domain header is known */
-	bool domain_recognition(const char* url);
+	char* domain_recognition(const char* url, const char* req_dom);
 
 	/* pressed ENTER button implicitly */
 	bool accept_credenetial();
@@ -72,7 +105,11 @@ public:
 	UIHandle();
 	~UIHandle();
 
-	/* callback function for new element appears*/
-	void valid_elem_cb(uint8_t* buffer, size_t size, bool (*func_ptr)(uint8_t*, size_t));
+	/* process data received from peripheral*/
+	bool process_data(uint8_t* buffer, size_t size);
+
+	/* assign callback to class */
+	bool add_callback(SerialComCb callback);
+
 };
 
