@@ -12,11 +12,8 @@ void task2(SerialCom& instance)
 
     while (true)
     {
-
-        if (instance.write_port(message, 6))
-            printf("write message\n");
-
-
+        instance.write_port(message, 6);
+ 
         std::this_thread::sleep_for(std::chrono::seconds(5));
     }
 }
@@ -24,11 +21,13 @@ void task2(SerialCom& instance)
 int main()
 {//TODO: try to use promise & future
 //TODO: add spdlog log library
-    /* Serial communication with esp32*/
-    SerialCom esp;
+
 
     /* Interface with windows API*/
     UIHandle win;
+
+    /* Serial communication with esp32*/
+    SerialCom esp;
 
     /* callback to send telegram*/
     win.add_callback([&esp](uint8_t* buffer, size_t size) {return esp.write_port(buffer, size); });
@@ -36,9 +35,4 @@ int main()
     /* callback to process received telegram*/
     esp.add_callback([&win](uint8_t* buffer, size_t size) {return win.process_data(buffer, size); });
 
-    std::thread d(task2, std::ref(esp));//start thread (find_url)
-
-    d.join();
-
-    
 }
