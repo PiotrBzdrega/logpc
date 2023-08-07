@@ -16,6 +16,10 @@ SerialCom::~SerialCom()
     if (event_t.joinable())
         event_t.join();
 
+    /* stop UIHandle callback thread */
+    if (callback_t.joinable())
+        callback_t.join();
+
     close_handle();
 }
 
@@ -67,20 +71,25 @@ void SerialCom::print_timestamp(const char* tag)
 
 BOOL SerialCom::withdraw_buffer(SSIZE_T len)
 {
-    printf("%s\n", (char*)read_buffer);
+    printf("received telegram:%s \t with size:%d\n", (char*)read_buffer,len);
 
-    /* allocate memory for new telegram*/
-    uint8_t* credential = (uint8_t*)malloc(len);
+    /* allocate memory for new telegram +1 for null terminator*/
+    uint8_t* credential = (uint8_t*)malloc(len+1);
 
     /* copy all telegram from buffer*/
-    for (size_t i = 0; i < len; i++)
+    for (SSIZE_T i = 0; i < len; i++)
         credential[i] = read_buffer[i];
+        
+    /* null terminator in case of printf*/
+    credential[len] = '\0';
 
-    /* forward memory to UIHandle*/
-    callback(credential, static_cast<int>(len));
+    /* stop UIHandle callback thread if pending */
+    if (callback_t.joinable())
+        callback_t.join();
 
-    /* release memory for new telegram*/
-    free(credential);
+    /* start thread for UIHandle thread*/
+    callback_t = std::thread(callback, credential, static_cast<int>(len));
+
     return true;
 }
 
@@ -185,6 +194,7 @@ BOOL SerialCom::comm_status(DWORD state)
 
     if (state & EV_TXEMPTY)
     {
+        //TODO: why there is no information about sended telegram???
         printf("Transmitt Queue Empty\n");
     }
 
@@ -327,7 +337,7 @@ void SerialCom::connection_loop()
     }
 }
 
-bool SerialCom::write_port(uint8_t* buffer, size_t size)
+void SerialCom::write_port(uint8_t* buffer, size_t size)
 {
     {
         std::unique_lock<decltype(mtx)> lk(mtx);
@@ -337,7 +347,7 @@ bool SerialCom::write_port(uint8_t* buffer, size_t size)
         else
         {
             printf("write_port| mutex blocked");
-            return false;
+            return;
         }
     }
     
@@ -365,7 +375,7 @@ bool SerialCom::write_port(uint8_t* buffer, size_t size)
     if (!oWrite.hEvent)
     {
         print_error("Create event failed");
-        return false;
+        return;
     }
 
     BOOL success = WriteFile(port, buffer, size, NULL, &oWrite);
@@ -416,7 +426,7 @@ bool SerialCom::write_port(uint8_t* buffer, size_t size)
     if (!CloseHandle(oWrite.hEvent))
         print_error("Fault when Closing Handle oEvent.hEvent");
 
-    return res;
+    return;
 }
 
 SSIZE_T SerialCom::read_port()

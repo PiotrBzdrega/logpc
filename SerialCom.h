@@ -12,7 +12,7 @@
 #include <functional>
 
 /* typedef function wrapper to UIHandle callback*/
-typedef std::function<bool(uint8_t*, int)> UIHandleCb;
+typedef std::function<void(uint8_t*, int)> UIHandleCb;
 
 constexpr int BUFFER_LEN = 1024;
 
@@ -52,11 +52,14 @@ private:
 	/* yields local time now */
 	void print_timestamp(const char* tag);
 
-	/* thread for event callback */
+	/* thread for event feedback */
 	std::thread event_t;
 
 	/* thread for port handling */
 	std::thread handle_t;
+
+	/* thread for UIHandle callback */
+	std::thread callback_t;
 
 	/* task for port handling thread */
 	void connection_loop();
@@ -90,7 +93,7 @@ public:
 	void event_callback();
 
 	/* Writes bytes to the serial port, returning 0 on success and -1 on failure.*/
-	bool write_port(uint8_t* buffer, size_t size);
+	void write_port(uint8_t* buffer, size_t size);
 
 	/* print message to sderr*/
 	void print_error(const char* context);
