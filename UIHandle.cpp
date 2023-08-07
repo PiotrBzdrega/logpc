@@ -2,6 +2,24 @@
 
 UIHandle::UIHandle()
 {
+
+    IUIAutomationMap ui_element[HASHSIZE] = { {"github","login_field","password"},
+                                  {"etutor","login","haslo"},
+                                  {"facebook","email","pass"},
+                                  {"centrum24","input_nik","ordinarypin"},
+                                  {"google", "identifierId", ""}, //"passwordId"},
+                                  {"yandex","passp-field-login","passp-field-passwd"},
+                                  {"linkedin","username","password"},
+                                  {"soundcloud","sign_in_up_email","password"},
+                                  {"wikipedia","wpName1","wpPassword"},
+                                  {"facebook","email",""},
+                                  {"quora","email","password"},
+                                  {"onet","email","password"},
+                                  {"wp","login","password"},
+                                  {"stackoverflow","email","password"}
+
+    };
+
     /* initialize domains credentials*/
     init_dict(ui_element);
 
@@ -9,16 +27,23 @@ UIHandle::UIHandle()
     HRESULT res = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     if SUCCEEDED(uia.CoCreateInstance(CLSID_CUIAutomation))
     {
-    /* start initialization thread */
-    init_t = std::thread(&UIHandle::initialize_instance, this);
+        ;
+    }
+    else
+    {
+        printf("Failed to Create instance of UIAutomation\n");
     }
 }
 
 UIHandle::~UIHandle()
 {
-    /* stop initialization thread */
-    if (init_t.joinable())
-        init_t.join();
+    /* stop wakeup thread if pending */
+    if (wakeup_t.joinable())
+        wakeup_t.join();
+
+    /* stop SerialCom callback thread*/
+    if (callback_t.joinable())
+        callback_t.join();
 
     /* release smart pointer*/
     uia.Release();
@@ -30,6 +55,24 @@ UIHandle::~UIHandle()
     release_dict();
 }
 
+void UIHandle::prepare_notification(UI_ENUM mode,std::string domain)
+{
+    printf("before callback_t.joinable()\n");
+    /* stop SerialCom callback thread if pending */
+    if (callback_t.joinable())
+        callback_t.join();
+
+    printf("before create_message(mode, domain)\n");
+
+    /* create acknowledge message*/
+    int len = create_message(mode, domain);
+
+    printf("before std::thread(callback, telegram, len);\n");
+
+    /* start thread for SerialCom callback*/
+    callback_t = std::thread(callback, telegram, len);
+}
+
 bool UIHandle::add_callback(SerialComCb callback)
 {
     /* assign to class callback*/
@@ -37,14 +80,50 @@ bool UIHandle::add_callback(SerialComCb callback)
     return true;
 }
 
-bool UIHandle::process_data(uint8_t* buffer, size_t size)
+int UIHandle::create_message(UI_ENUM mode, std::string domain)
 {
+    printf("elements to create message: %d and %s\n",mode, domain.c_str());
+
+    /* pointer for telegram*/
+    uint8_t* tmp = telegram;
+
+    /* mode int to char and move pointer*/
+    *tmp++ = static_cast<uint8_t>(mode + '0');
+
+    /* domain string has at least one character*/
+    if (domain.size())
+    {
+        /* insert delimiter and move pointer forward*/
+        *tmp++ = ',';
+
+        /* copy domain name into telegram*/
+        for (size_t i = 0; i < domain.size(); i++)
+            *tmp++ = domain[i];
+
+        /* insert ending null character */
+        *tmp = '\0';
+    }
+
+    printf("created msg: %s\n", telegram);
+
+    /* return difference of pointers*/
+    return (tmp - telegram);
+}
+
+
+void UIHandle::process_data(uint8_t* buffer, size_t size)
+{
+   
+    printf("received telegram from SERIALCOM:%s \t with size:%d\n", (char*)buffer, size);
+
+
     //reinterpret uint8_t* to char* is followed by convert the char* to std::string
-    std::string input(reinterpret_cast<char*>(buffer));
+    std::string input(reinterpret_cast<const char*>(buffer),size);
+
+    std::cout << input<<'\n';
 
     // Regular expression pattern to match words between commas and first digit.
-    std::regex pattern("^(\\d)(?:,(\\w+))?(?:,(\\w+))?$");
-
+    std::regex pattern("^(\\d)(?:,([^,\\s]+))?(?:,([^,\\s]+))?(?:,([^,\\s]+))?$");
 
     /* check if pattern covers input */
     if (std::regex_match(input, pattern))
@@ -56,107 +135,222 @@ bool UIHandle::process_data(uint8_t* buffer, size_t size)
         /* split words in match*/
         while (std::getline(ss, word, ',')) 
         {
-            printf("%s\n", word);
+            std::cout << word<<'\n';
+            /*printf("%s\n", word);*/
             /* add new element to list */
             telegram_part.push_back(word);            
         }
         
+        printf("received correct telegram %s, with %d elements\n", buffer, telegram_part.size());
+
+        printf("regex recognized following parts:\n");
+
+        for (size_t i = 0; i < telegram_part.size(); i++)
+            std::cout <<"element "<<i<<" "<< telegram_part[i] << '\n';
+
         /* according regex pattern 0 element is a digit example: char '2' -> int 50. 50-48('0')=2*/
         UI_ENUM mode = static_cast<UI_ENUM>(telegram_part[0][0]-'0');
+
+        /* Start initialization if only if specific mode has been received*/
+        if (mode == UI_DOMAIN   or
+            mode == UI_LOGIN    or 
+            mode == UI_PASSWORD or 
+            mode == UI_LOGPASS)
+        {
+            /* start initialization*/
+            if (!initialize_instance())
+            {
+                /* initialization failed*/
+                prepare_notification(UI_FAIL, "");
+                //free(buffer);
+            }
+        }
+        printf("initialization done\n");
 
         switch (mode)
         {
         case UI_DOMAIN :
+            printf("telegram requests UI_DOMAIN\n");
+            /* stop wakeup thread if pending */
+            if (wakeup_t.joinable())
+                wakeup_t.join();
 
+            /* start thread for wakeup functionality*/
+            wakeup_t = std::thread(&UIHandle::look_for_web_field,this);
             break;
-        case UI_LOGIN:
         case UI_PASSWORD:
 
+            printf("telegram requests %s", (mode == UI_LOGIN) ? "UI_LOGIN" : "UI_PASSWORD");
             /* following telegram should contain 3 elements in telegram*/
-            if (telegram_part.size()==3)
+            if (telegram_part.size() == 3)
             {
                 /* enter found credential*/
-                bool res = credential(mode, telegram_part[1].c_str(), telegram_part[2].c_str());
+                if (credential(mode, telegram_part[1].c_str(), telegram_part[2].c_str()))
+                {
+                    /* press enter*/
+                    accept_credenetial();
+
+                    prepare_notification(UI_DONE, telegram_part[1]);                 
+                }
+                else
+                {
+                    printf("failed to enter %s credential\n", (mode == UI_LOGIN) ? "UI_LOGIN" : "UI_PASSWORD");
+
+                    prepare_notification(UI_FAIL, telegram_part[1]);
+                }
             }
+            else
+            {
+                printf("wrong amount of elements regex found :%d :\n", telegram_part.size());
+            }
+            break;
+        case UI_LOGPASS:
+            printf("telegram requests UI_LOGPASS");
+            if (telegram_part.size() == 4)
+            {
+                /* enter found login*/
+                if (credential(UI_LOGIN, telegram_part[1].c_str(), telegram_part[2].c_str()))
+                {   
+                    /* enter found password*/
+                    if (credential(UI_PASSWORD, telegram_part[1].c_str(), telegram_part[3].c_str()))
+                    {
+                        /* press enter*/
+                        accept_credenetial();
+
+                        prepare_notification(UI_DONE, telegram_part[1]);
+                    }
+                    else
+                    {
+                        printf("failed to enter UI_PASSWORD credential\n");
+
+                        prepare_notification(UI_FAIL, telegram_part[1]);
+                    }
+
+                }
+                else
+                {
+                    printf("failed to enter UI_LOGIN credential\n");
+
+                    prepare_notification(UI_FAIL, telegram_part[1]);
+                }
+            }
+            else
+            {
+                printf("wrong amount of elements regex found :%d :\n", telegram_part.size());
+            }
+                
 
             break;
         case UI_DONE:
-
+            break;
         case UI_NEW_CREDENTIAL:
-       
+            break;
         case UI_DELETE_ALL:
-
+            break;
         case UI_MISSED:
-
+            printf("telegram requests UI_MISSED\n");
+            break;
         default:
+            printf("unknown mode received %d\n", mode);
             break;
         }
-
-
+    }
+    else
+    {
+    printf("unknown message template has been received %s\n",buffer);
     }
 
-    return false;
+    free(buffer);
+    return ;
 }
 
-void UIHandle::finding_loop()
+void UIHandle::look_for_web_field()
 {
+    /* time stamp now*/
+    auto startTime = std::chrono::high_resolution_clock::now();
+
     /* result of function invocation*/
     ret_url res = { nullptr,1 };
-    while (res.val)
+    while (true)
     {
-        /*check if message is comming */
-        {
-            std::unique_lock<decltype(mtx_msg)> lk(mtx_msg);
+        // Calculate the elapsed time
+        auto currentTime = std::chrono::high_resolution_clock::now();
+        auto elapsedTime = std::chrono::duration_cast<std::chrono::seconds>(currentTime - startTime).count();
 
-            /* wait for mutex with timeout*/
-            if (cv_msg.wait_for(lk, std::chrono::seconds(20), [this]() {return !msg_pending; }));
-            else
+        // Check if the loop duration is over (5 seconds)
+        if (elapsedTime >= 5)
+        {
+            printf(" searching url timeout\n");
+            return;
+        }
+
+        /* search for known website*/
+        res = find_url("");
+
+        /* fatal error*/
+        if (!res.val)
+            return;
+        else if (res.val and res.domain)
+        {
+            /* found familiar domain*/
+
+            /* check what elements are available on site*/
+            UI_ENUM element = which_element(res.domain);
+
+            printf("which_element returned\n");
+
+            if (element not_eq UI_ENUM::UI_UNKNOWN)
             {
-                printf("timeout for mtx_msg\n");
-                /* if timeout happened reset msg_pending */
-                msg_pending = false;
-                /* finish task if there is no response from uC*/
-                break;
+                printf("before prepare notification\n");
+                /* request for credentials*/
+                prepare_notification(element, res.domain);
+                printf("after prepare notification\n");
+                return;
             }
+            
         }
 
-        /* search w/o concrete domain comparison */
-        res=find_url("");
-        /* got known domain */
-        if (res.val)
-        {
-
-            UI_ENUM element = find_element(UI_ENUM::UI_UNKNOWN, res.domain);
-            /* invoke callback with found*/
-                if (callback)
-                {
-                    callback(static_cast<uint8_t*>(res.domain),)
-                }
-            valid_elem_cb((uint8_t*)mbstring, (length) + 1, callback);
-        }
+        std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 
-    /* out of while loop, something went wrong*/
-    return initialize_instance();
 }
 
-void UIHandle::initialize_instance() 
+bool UIHandle::initialize_instance() 
 {
+    HWND hwnd;
+
+    auto startTime = std::chrono::high_resolution_clock::now();
 
     while (true)
     {
+
+        // Calculate the elapsed time
+        auto currentTime = std::chrono::high_resolution_clock::now();
+        auto elapsedTime = std::chrono::duration_cast<std::chrono::seconds>(currentTime - startTime).count();
+
+        /* through 5 seconds, initialization cannot be finished*/
+        if (elapsedTime >= 5)
+        {
+            printf(" initialization timeout\n");
+            return false;
+        }
+
+
         HWND child_handl = nullptr; // always nullptr
 
         /* check if some window has className "Chrome_WidgetWin_1"*/
         hwnd = FindWindowEx(nullptr, child_handl, L"Chrome_WidgetWin_1", nullptr);
         if (!hwnd)
-            return;
-
+        {
+            printf("handle from FindWindowEx is nullptr\n");
+            return false;
+        }
+            
         /* Window has title and is not closed/minimized */
         if (IsWindowVisible(hwnd) && !IsIconic(hwnd) && GetWindowTextLength(hwnd) > 0)
         {
             int c = GetWindowTextLength(hwnd);
-            printf("%d\n", c);
+            //printf("%d\n", c);
             LPWSTR pszMem = (LPWSTR)malloc(sizeof(LPWSTR) * (c+1));
             GetWindowText(hwnd, pszMem, c+1);
             wprintf(L"%s\n", pszMem);
@@ -166,18 +360,17 @@ void UIHandle::initialize_instance()
         }
     }
 
+    printf("%p\n", root.p);
+    printf("%p\n", uia.p);
 
-        if SUCCEEDED(uia->ElementFromHandle(hwnd, &root))
-        {
-            return finding_loop();
-        }
-    
-}
+        root = nullptr;
 
-void UIHandle::valid_elem_cb(uint8_t* buffer, size_t size)
-{
+    if SUCCEEDED(uia->ElementFromHandle(hwnd, &root))
+    {
+        return true;
+    }
 
-    callback(buffer, size);
+   return false;
 }
 
 bool UIHandle::accept_credenetial()
@@ -228,7 +421,7 @@ char* UIHandle::domain_recognition(const char* url,const char* req_dom)
             if (lookup(page))
             {
                 /* requested domain page has some characters*/
-                if (req_dom!='\0')
+                if (req_dom!="")
                 {
                     /* compare requested domain with recognized alias of page*/
                     if (strcmp(page, req_dom)==0)
@@ -246,7 +439,7 @@ char* UIHandle::domain_recognition(const char* url,const char* req_dom)
             }
             else
             {
-                /* release momory if we don't have such domain in dictionary*/
+                /* release memory if we don't have such domain in dictionary*/
                 free(page);
                 page = nullptr;
 
@@ -520,7 +713,7 @@ UI_ENUM UIHandle::which_element(const char* domain)
             if (!var.bstrVal)
             {
                 printf("#### string allocation error: var.bstrVal is nullptr \n");
-                return UI_ENUM::UI_UNKNOWN;
+                continue;
             }
         }
         else if (ui == UI_ENUM::UI_PASSWORD)
@@ -534,17 +727,21 @@ UI_ENUM UIHandle::which_element(const char* domain)
         /* condition to find UI Element*/
         CComPtr<IUIAutomationCondition> pane_cond;
 
-        res = uia->CreatePropertyCondition(UIA_AutomationIdPropertyId, var, &pane_cond);
+
+        //UIA_HasKeyboardFocusPropertyId
+
+        res = uia->CreatePropertyCondition(property, var, &pane_cond);
         if FAILED(res)
-        {
-            /* there is missing LOGIN field*/
-            if (ui == UI_ENUM::UI_LOGIN)
-                continue;
+        {          
 
             printf("#### condition property creation error: CreatePropertyCondition() returns %08x \n", res);
             pane_cond.Release();
-            SysFreeString(var.bstrVal);
-            return UI_ENUM::UI_UNKNOWN;
+
+            /*BSTR has been used for UI_LOGIN */
+            if (ui == UI_ENUM::UI_LOGIN)
+                SysFreeString(var.bstrVal);
+
+            continue;
         }
 
         if (ui == UI_ENUM::UI_LOGIN)
@@ -558,23 +755,16 @@ UI_ENUM UIHandle::which_element(const char* domain)
         res = root->FindFirst(TreeScope_Descendants, pane_cond, &element);
         if FAILED(res)
         {
-            /* there is missing LOGIN field*/
-            if (ui == UI_ENUM::UI_LOGIN)
-                continue;
-
+                
             printf("#### finding error: FindFirst() returns %08x \n", res);
             pane_cond.Release();
-            return UI_ENUM::UI_UNKNOWN;
+            continue;
         }
 
         if (!element)
-        {
-            /* there is missing LOGIN field*/
-            if (ui == UI_ENUM::UI_LOGIN)
-                continue;
-
+        {              
             printf("#### element allocation error: element is nullptr \n");
-            return UI_ENUM::UI_UNKNOWN;
+            continue;
         }
 
         pane_cond.Release();
@@ -583,33 +773,48 @@ UI_ENUM UIHandle::which_element(const char* domain)
         wprintf(L"name:%ls\n", (wchar_t*)name);
         SysFreeString(name);
         printf("%p\n", element);
-        element.Release();
-
+        
+        //var.vt = VT_BSTR;
         /* check if field is filled out or empty*/
         if FAILED(element->GetCurrentPropertyValue(UIA_ValueValuePropertyId, &var))
-            return UI_ENUM::UI_UNKNOWN;
+        {
+            printf("#### current property value error: GetCurrentPropertyValue() returns %08x \n", res);
+            continue;
+        }
         if (!var.bstrVal)
-            return UI_ENUM::UI_UNKNOWN;
+        {
+            printf("#### element allocation error: element is nullptr \n");
+            continue;
+        }
 
         wprintf(L"content of field: %s\n", var.bstrVal);
 
-        /* login field is empty*/
-        if ((var.bstrVal[0] == L'\0' && ui == UI_ENUM::UI_LOGIN) ||
+        /* field is available to insert credential */
+        if (/* var.bstrVal[0] == L'\0' && */ ui == UI_ENUM::UI_LOGIN ||
             ui == UI_ENUM::UI_PASSWORD)
         {
+            /* UI_LOGIN already stored in ret_val -> BOTH fields available */
+            if (ret_val== UI_ENUM::UI_LOGIN)
+                ret_val = UI_ENUM::UI_LOGPASS;
             /* save found UI*/
-            ret_val = static_cast<UI_ENUM>(ui);
-            SysFreeString(var.bstrVal);
-            break;
+            else
+                ret_val = static_cast<UI_ENUM>(ui);
+
         }        
         SysFreeString(var.bstrVal);
+        element.Release();
     }
-
     return ret_val;
 }
 
 bool UIHandle::credential(UI_ENUM ui_mode, const char* domain, const char* credential)
 {
+    ret_url url = find_url(domain);
+    if (!url.domain)
+    {
+        printf("#### finding requested url error \n");
+        return false;
+    }
 
     CComPtr<IUIAutomationElement> elem = find_element(ui_mode, domain);
 
@@ -662,8 +867,48 @@ bool UIHandle::credential(UI_ENUM ui_mode, const char* domain, const char* crede
     }
 
     pattern->SetValue(w_text);
+    //pattern->get_Value(&var.bstrVal);
+
+
+    if FAILED(elem->GetCurrentPropertyValue(UIA_ValueValuePropertyId, &var))
+    {
+        printf("### GetCurrentPropertyValue error: cannot check inserted credential \n");
+        return false;
+    }
+       
+    if (!var.bstrVal)
+    {
+        printf("### string allocation memory error: !var.bstrVal is nullptr \n");
+        return false;
+    }
+
+    wprintf(L"inserted content: %s\n", var.bstrVal);
+
+    if (w_text != var.bstrVal)
+    {
+        printf("### set text is not same like get \n");
+        //TODO: return fault if texts are not the same
+        //return false;
+    }
+    
+    SysFreeString(var.bstrVal);
+
+    // Check if the element HasKeyboardFocus property
+    VARIANT_BOOL hasKeyboardFocus;
+    if FAILED(elem->GetCurrentPropertyValue(UIA_HasKeyboardFocusPropertyId, &var))
+    {
+        printf("### GetCurrentPropertyValue error: cannot check if element HasKeyboardFocus\n");
+        //return false;
+    }
+
+    if (var.boolVal == VARIANT_TRUE) 
+        printf("The element has keyboard focus.");
+    else 
+        printf("The element does not have keyboard focus.");
+    
     pattern->Release();
     free(w_text);
+    //SysFreeString(var.bstrVal);
 
 
     elem.Release();
