@@ -2,7 +2,7 @@
 
 UIHandle::UIHandle()
 {
-
+    //TODO: attach it as part of object instance
     IUIAutomationMap ui_element[HASHSIZE] = { {"github","login_field","password"},
                                   {"etutor","login","haslo"},
                                   {"facebook","email","pass"},
@@ -327,9 +327,9 @@ bool UIHandle::initialize_instance()
         // Calculate the elapsed time
         auto currentTime = std::chrono::high_resolution_clock::now();
         auto elapsedTime = std::chrono::duration_cast<std::chrono::seconds>(currentTime - startTime).count();
-
-        /* through 5 seconds, initialization cannot be finished*/
-        if (elapsedTime >= 5)
+        //printf("elapsedTime :%d\n",elapsedTime);
+        /* through 10 seconds, initialization cannot be finished*/
+        if (elapsedTime >= 10)
         {
             printf(" initialization timeout\n");
             return false;
@@ -775,6 +775,7 @@ UI_ENUM UIHandle::which_element(const char* domain)
         printf("%p\n", element);
         
         //var.vt = VT_BSTR;
+        //TODO: func says that fields are empty but seems to be differently 
         /* check if field is filled out or empty*/
         if FAILED(element->GetCurrentPropertyValue(UIA_ValueValuePropertyId, &var))
         {
@@ -798,8 +799,7 @@ UI_ENUM UIHandle::which_element(const char* domain)
                 ret_val = UI_ENUM::UI_LOGPASS;
             /* save found UI*/
             else
-                ret_val = static_cast<UI_ENUM>(ui);
-
+                ret_val = static_cast<UI_ENUM>(ui); 
         }        
         SysFreeString(var.bstrVal);
         element.Release();
