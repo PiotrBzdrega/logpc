@@ -1,6 +1,6 @@
 #include "SerialCom.h"
 
-SerialCom::SerialCom(const char* device_name, uint32_t com_speed) : device{ device_name }, baud_rate{ com_speed }, port{ nullptr } 
+SerialCom::SerialCom(const char* device_name, uint32_t com_speed) : device{ device_name }, baud_rate{ com_speed }, port{ nullptr }, old_dwModemStatus{}
 {
     /* start port handling thread */
     handle_t = std::thread(&SerialCom::connection_loop, this);
@@ -96,7 +96,7 @@ BOOL SerialCom::withdraw_buffer(SSIZE_T len)
 BOOL SerialCom::comm_status(DWORD state)
 {
     DWORD dwModemStatus=0;
-    static DWORD tmp = 0;
+    bool newModemStatus = false;
     
     //TODO: recognize disconnection faster
     DCB com_state = { 0 };
@@ -124,11 +124,12 @@ BOOL SerialCom::comm_status(DWORD state)
             print_error("GetCommModemStatus() error");
             return false;
         }       
-        if (tmp!= dwModemStatus)
+        if (old_dwModemStatus != dwModemStatus)
         {
             printf("new modem status 0x%04X \n", dwModemStatus);
+            newModemStatus = true;
         }
-        tmp = dwModemStatus;
+        old_dwModemStatus = dwModemStatus;
         if (!(dwModemStatus & (MS_CTS_ON | MS_DSR_ON | MS_RLSD_ON | MS_RING_ON)))
         {
             //print_error("mutex locked\n");
@@ -154,24 +155,24 @@ BOOL SerialCom::comm_status(DWORD state)
         }
     }
 
-    if (state & EV_CTS)
+    if ((state & EV_CTS) || newModemStatus)
     {
         printf("CTS changed state value:%d\n", bool(dwModemStatus & MS_CTS_ON));
     }
 
-    if (state & EV_DSR)
+    if ((state & EV_DSR) || newModemStatus)
     {
         printf("DSR changed state value:%d\n", bool(dwModemStatus & MS_DSR_ON));
     }
 
-    if (state & EV_RLSD)
+    if ((state & EV_RLSD) || newModemStatus)
     {
         /*RLSD (Receive Line Signal Detect) is commonly referred to
          as the CD (Carrier Detect) line*/
         printf("RLSD changed state value:%d\n", bool(dwModemStatus & MS_RLSD_ON));
     }
 
-    if (state & EV_RING)
+    if ((state & EV_RING) || newModemStatus)
     {
         printf("Ring signal detected value:%d\n", bool(dwModemStatus & MS_RING_ON));
     }

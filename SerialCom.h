@@ -31,9 +31,12 @@ private:
 	/* handle for serial port */
 	HANDLE port;
 
+	DWORD old_dwModemStatus;
+
 	/* closed handle to not close twice */
 	BOOL handle_closed = true;
 
+	//TODO:clean buffer after read, block access to shared data
 	/* read messages are stored in this message after read_port() */
 	uint8_t read_buffer[BUFFER_LEN];
 
