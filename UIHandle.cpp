@@ -178,6 +178,7 @@ void UIHandle::process_data(uint8_t* buffer, size_t size)
             /* start thread for wakeup functionality*/
             wakeup_t = std::thread(&UIHandle::look_for_web_field,this);
             break;
+        case UI_LOGIN:
         case UI_PASSWORD:
 
             printf("telegram requests %s", (mode == UI_LOGIN) ? "UI_LOGIN" : "UI_PASSWORD");
@@ -245,7 +246,7 @@ void UIHandle::process_data(uint8_t* buffer, size_t size)
             break;
         case UI_NEW_CREDENTIAL:
             break;
-        case UI_DELETE_ALL:
+        case UI_ERASE:
             break;
         case UI_MISSED:
             printf("telegram requests UI_MISSED\n");
@@ -335,29 +336,34 @@ bool UIHandle::initialize_instance()
             return false;
         }
 
+        /* handle is not nullptr*/
+        if (window_handle)
+        {
+            /* Window has title and is not closed/minimized */
+            if (IsWindowVisible(window_handle) && !IsIconic(window_handle) && GetWindowTextLength(window_handle) > 0)
+            {
+                printf("elapsedTime :%d\n", elapsedTime);
+                int c = GetWindowTextLength(window_handle);
+                //printf("%d\n", c);
+                LPWSTR pszMem = (LPWSTR)malloc(sizeof(LPWSTR) * (c + 1));
+                GetWindowText(window_handle, pszMem, c + 1);
+                wprintf(L"%s\n", pszMem);
+                free(pszMem);
+
+                break;
+            }
+        }
 
         HWND child_handl = nullptr; // always nullptr
 
         /* check if some window has className "Chrome_WidgetWin_1"*/
-        hwnd = FindWindowEx(nullptr, child_handl, L"Chrome_WidgetWin_1", nullptr);
-        if (!hwnd)
+        window_handle = FindWindowEx(nullptr, child_handl, L"Chrome_WidgetWin_1", nullptr);
+        if (!window_handle)
         {
             printf("handle from FindWindowEx is nullptr\n");
             return false;
         }
-            
-        /* Window has title and is not closed/minimized */
-        if (IsWindowVisible(hwnd) && !IsIconic(hwnd) && GetWindowTextLength(hwnd) > 0)
-        {
-            int c = GetWindowTextLength(hwnd);
-            //printf("%d\n", c);
-            LPWSTR pszMem = (LPWSTR)malloc(sizeof(LPWSTR) * (c+1));
-            GetWindowText(hwnd, pszMem, c+1);
-            wprintf(L"%s\n", pszMem);
-            free(pszMem);
-
-            break;
-        }
+        
     }
 
     printf("%p\n", root.p);
@@ -365,7 +371,7 @@ bool UIHandle::initialize_instance()
 
         root = nullptr;
 
-    if SUCCEEDED(uia->ElementFromHandle(hwnd, &root))
+    if SUCCEEDED(uia->ElementFromHandle(window_handle, &root))
     {
         return true;
     }

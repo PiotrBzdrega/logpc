@@ -22,7 +22,7 @@ typedef enum UI_ENUM
 	UI_LOGPASS = 3,
 	UI_DONE = 4,
 	UI_NEW_CREDENTIAL = 5,
-	UI_DELETE_ALL = 6,
+	UI_ERASE = 6,
 	UI_MISSED = 7,
 	UI_FAIL = 8,
 };
@@ -48,6 +48,9 @@ private:
 
 	/* smart pointer for Component Object Model of individual UI Element */
 	CComPtr<IUIAutomationElement> root;
+
+	/* handle to web window */
+	HWND window_handle;
 
 	/* SerialCom callback thread */
 	std::thread callback_t;
