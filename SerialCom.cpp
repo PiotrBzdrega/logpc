@@ -4,6 +4,11 @@ SerialCom::SerialCom(const char* device_name, uint32_t com_speed) : device{ devi
 {
     /* start port handling thread */
     handle_t = std::thread(&SerialCom::connection_loop, this);
+
+    /* apply color for logs*/
+    spdlog::stdout_color_mt("SerialCom");
+
+    spdlog::debug("SerialCom instance created");
 }
 
 SerialCom::~SerialCom()
@@ -28,11 +33,11 @@ void SerialCom::close_handle()
     if (!handle_closed)
     {
         if (!CloseHandle(port))
-            print_error("Fault when Closing main Handle");
+            spdlog::error("Fault when Closing main Handle, {}", last_error());
         handle_closed = true;
     }
     else
-        printf("handle already closed\n");
+        spdlog::debug("handle already closed");
 }
 
 bool SerialCom::add_callback(UIHandleCb callback)
@@ -54,24 +59,21 @@ void SerialCom::print_error(const char* context)
     fprintf(stderr, "%s: %s\n", context, buffer);
 }
 
-void SerialCom::print_timestamp(const char* tag)
+std::string SerialCom::last_error()
 {
-    struct tm newtime;
-    __time32_t aclock;
-    _time32(&aclock);   // Get time in seconds.
-    _localtime32_s(&newtime, &aclock);   // Convert time to struct tm form.
-    char buffer[26];
-
-    /*Converts given calendar time tm to a textual representation 
-    of the following fixed 25-character form: Www Mmm dd hh:mm:ss yyyy\n*/
-    asctime_s(buffer, sizeof buffer, &newtime); 
-    printf("[%s]The current local time is: %s", tag, buffer);
-    return;
+    DWORD error_code = GetLastError();
+    char buffer[256]{};
+    DWORD size = FormatMessageA(
+        FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_MAX_WIDTH_MASK,
+        NULL, error_code, MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US),
+        buffer, sizeof(buffer), NULL);
+    return std::string(buffer);  
 }
+
 
 BOOL SerialCom::withdraw_buffer(SSIZE_T len)
 {
-    printf("received telegram:%s \t with size:%d\n", (char*)read_buffer,len);
+    spdlog::debug("received telegram:{}  with size:{1}", (char*)read_buffer,len);
 
     /* allocate memory for new telegram +1 for null terminator*/
     uint8_t* credential = (uint8_t*)malloc(len+1);
@@ -81,7 +83,7 @@ BOOL SerialCom::withdraw_buffer(SSIZE_T len)
         credential[i] = read_buffer[i];
         
     /* null terminator in case of printf*/
-    credential[len] = '\0';
+    //credential[len] = '\0';
 
     /* stop UIHandle callback thread if pending */
     if (callback_t.joinable())
@@ -102,14 +104,14 @@ BOOL SerialCom::comm_status(DWORD state)
     DCB com_state = { 0 };
     if (!GetCommState(port, &com_state))
     {
-        print_error("Failed to get serial settings");
+        spdlog::error("Failed to get serial settings, {}", last_error());
         //close_handle();
     }
     else
     {
         if (!SetCommState(port, &com_state))
         {
-            print_error("Failed to set serial settings");
+            spdlog::error("Failed to set serial settings, {}", last_error());
         }
         
         //printf("correctly get comm");
@@ -121,12 +123,13 @@ BOOL SerialCom::comm_status(DWORD state)
         if (!GetCommModemStatus(port, &dwModemStatus))
         {
             // Error in GetCommModemStatus;
-            print_error("GetCommModemStatus() error");
+            spdlog::error("GetCommModemStatus() error, {}", last_error());
+            
             return false;
         }       
         if (old_dwModemStatus != dwModemStatus)
         {
-            printf("new modem status 0x%04X \n", dwModemStatus);
+            spdlog::debug("new modem status {:08x}", dwModemStatus);
             newModemStatus = true;
         }
         old_dwModemStatus = dwModemStatus;
@@ -135,8 +138,7 @@ BOOL SerialCom::comm_status(DWORD state)
             //print_error("mutex locked\n");
             if (!port_down)
             {
-                printf("0x%04X \n", dwModemStatus);
-                printf("port_down\n");
+                spdlog::debug("{:04x} port down", dwModemStatus);
                 port_down = true;
                 cv.notify_all();
                 //close_handle();
@@ -147,8 +149,7 @@ BOOL SerialCom::comm_status(DWORD state)
         {
             if (port_down)
             {
-                //printf("mutex released\n");
-                printf("port_up\n");
+                spdlog::debug("port up");
                 port_down = false;
                 cv.notify_all();
             }
@@ -157,30 +158,30 @@ BOOL SerialCom::comm_status(DWORD state)
 
     if ((state & EV_CTS) || newModemStatus)
     {
-        printf("CTS changed state value:%d\n", bool(dwModemStatus & MS_CTS_ON));
+        spdlog::debug("CTS changed state value {}", bool(dwModemStatus & MS_CTS_ON));
     }
 
     if ((state & EV_DSR) || newModemStatus)
     {
-        printf("DSR changed state value:%d\n", bool(dwModemStatus & MS_DSR_ON));
+        spdlog::debug("DSR changed state value {}", bool(dwModemStatus & MS_DSR_ON));
     }
 
     if ((state & EV_RLSD) || newModemStatus)
     {
         /*RLSD (Receive Line Signal Detect) is commonly referred to
          as the CD (Carrier Detect) line*/
-        printf("RLSD changed state value:%d\n", bool(dwModemStatus & MS_RLSD_ON));
+        spdlog::debug("RLSD changed state value {}", bool(dwModemStatus & MS_RLSD_ON));
     }
 
     if ((state & EV_RING) || newModemStatus)
     {
-        printf("Ring signal detected value:%d\n", bool(dwModemStatus & MS_RING_ON));
+        spdlog::debug("Ring signal detected value {}", bool(dwModemStatus & MS_RING_ON));
     }
 
 
     if (state & EV_RXCHAR)
     {
-        printf("Any Character received\n");
+        spdlog::debug("Any Character received");
         SSIZE_T received= read_port();
         if (received)
         {
@@ -190,46 +191,46 @@ BOOL SerialCom::comm_status(DWORD state)
 
     if (state & EV_RXFLAG)
     {
-        printf("Received certain character\n");
+        spdlog::debug("Received certain character");
     }
 
     if (state & EV_TXEMPTY)
     {
         //TODO: why there is no information about sended telegram???
-        printf("Transmitt Queue Empty\n");
+        spdlog::debug("Transmitt Queue Empty");
     }
 
     if (state & EV_BREAK)
     {
-        printf("BREAK received\n");
+        spdlog::debug("BREAK received");
     }
 
     if (state & EV_ERR)
     {
-        printf("Line status error occurred\n");
+        spdlog::debug("Line status error occurred");
     }
 
     if (state & EV_PERR)
     {
-        printf("Printer error occured\n");
+        spdlog::debug("Printer error occured");
     }
 
     if (state & EV_RX80FULL)
     {
-        printf("Receive buffer is 80 percent full\n");
+        spdlog::debug("Receive buffer is 80 percent full");
     }
 
     if (state & EV_EVENT1)
     {
-        printf("Provider specific event 1\n");
+        spdlog::debug("Provider specific event 1");
     }
 
     if (state & EV_EVENT2)
     {
-        printf("Provider specific event 2\n");
+        spdlog::debug("Provider specific event 2");
     }
 
-    print_timestamp("comm_status");
+    spdlog::debug(comm_status);
 
     return (state & 0xFFFF);
 }
@@ -249,8 +250,7 @@ int SerialCom::open_serial_port()
         0);                                     /* A valid handle to a template file with the GENERIC_READ access right*/
     if (port == INVALID_HANDLE_VALUE)
     {
-        print_error(device);
-
+        spdlog::error("{} , {}", device, last_error());
         return -1;
     }
     else
@@ -261,7 +261,7 @@ int SerialCom::open_serial_port()
 
         if (event_t.joinable())
         {
-            printf("event callback wait for join\n");
+            spdlog::debug("event callback wait for join");
             event_t.join();       
         }
            
@@ -269,12 +269,12 @@ int SerialCom::open_serial_port()
         /* start event thread */
         event_t = std::thread(&SerialCom::event_callback, this);
     }
-    printf("port opened succesfully\n");
+    spdlog::debug("port opened succesfully");
     // Flush away any bytes previously read or written.
     BOOL success = FlushFileBuffers(port);
     if (!success)
     {
-        print_error("Failed to flush serial port");
+        spdlog::error("Failed to flush serial port , {}", device, last_error());
         close_handle();
         return -1;
     }
@@ -290,7 +290,7 @@ int SerialCom::open_serial_port()
     success = SetCommTimeouts(port, &timeouts);
     if (!success)
     {
-        print_error("Failed to set serial timeouts");
+        spdlog::error("Failed to set serial timeouts , {}",last_error());
         close_handle();
         return -1;
     }
@@ -305,7 +305,7 @@ int SerialCom::open_serial_port()
     success = SetCommState(port, &state);
     if (!success)
     {
-        print_error("Failed to set serial settings");
+        spdlog::error("Failed to set serial settings , {}", last_error());
         close_handle();
         return -1;
     }
@@ -313,7 +313,7 @@ int SerialCom::open_serial_port()
     success = GetCommState(port, &state);
     if (!success)
     {
-        print_error("Failed to get serial settings");
+        spdlog::error("Failed to get serial settings , {}", last_error());
         close_handle();
         return -1;
     }
@@ -344,10 +344,10 @@ void SerialCom::write_port(uint8_t* buffer, size_t size)
         std::unique_lock<decltype(mtx)> lk(mtx);
         /* drop writing if mutex got time-out*/
         if (cv.wait_for(lk, std::chrono::seconds(2), [this]() {return !port_down; }))
-            printf("write_port| mutex released");
+            spdlog::debug("write_port| mutex released");
         else
         {
-            printf("write_port| mutex blocked");
+            spdlog::debug("write_port| mutex blocked");
             return;
         }
     }
@@ -375,7 +375,7 @@ void SerialCom::write_port(uint8_t* buffer, size_t size)
     );
     if (!oWrite.hEvent)
     {
-        print_error("Create event failed");
+        spdlog::error("Create event failed , {}", last_error());
         return;
     }
 
@@ -384,7 +384,7 @@ void SerialCom::write_port(uint8_t* buffer, size_t size)
     {   
         if (GetLastError() != ERROR_IO_PENDING)
         {
-            print_error("Failed to write to port");
+            spdlog::error("Failed to write to port , {}", last_error());
             res=false ;
         }
         else
@@ -406,18 +406,17 @@ void SerialCom::write_port(uint8_t* buffer, size_t size)
                         res = true;
                         if (written != size)
                         {
-                            printf("written:%lu, size:%zu\n", written, size);
-                            print_error("Failed to write all bytes to port ");
+                            spdlog::error("Failed to write all bytes to port written:{}, size:{} , {}", written, size, last_error());
                             res = false;
                         }               
                         else
                         {
-                            printf("succesfully written:%lu, size:%zu\n", written, size);
+                            spdlog::debug("succesfully written:{}, size:{}", written, size);
                         }
                     }
                 break;
             default:
-                print_error("Problem with OVERLAPPED event handle ");
+                spdlog::error("Problem with OVERLAPPED event handle , {}", last_error());
                 res = false;
                 break;
             }
@@ -425,7 +424,7 @@ void SerialCom::write_port(uint8_t* buffer, size_t size)
     }
 
     if (!CloseHandle(oWrite.hEvent))
-        print_error("Fault when Closing Handle oEvent.hEvent");
+        spdlog::error("Fault when Closing Handle oEvent.hEvent , {}", last_error());
 
     return;
 }
@@ -449,7 +448,7 @@ SSIZE_T SerialCom::read_port()
 
     if (!oRead.hEvent)
     {
-        print_error("Create event failed");
+        spdlog::error(" Create event failed, {}", last_error());
         return -1;
     }
 
@@ -460,7 +459,7 @@ SSIZE_T SerialCom::read_port()
         {
             if (GetLastError() != ERROR_IO_PENDING)
             {
-                print_error("Failed to write to port");
+                spdlog::error("Failed to write to port , {}", last_error());
                 res = -1;
             }
             else
@@ -472,7 +471,7 @@ SSIZE_T SerialCom::read_port()
         else
         {
             /* read immediatelly done*/
-            print_timestamp("read immediatelly");
+            spdlog::debug("read immediatelly");
         }
     }
     
@@ -490,14 +489,14 @@ SSIZE_T SerialCom::read_port()
                 success = GetOverlappedResult(port, &oRead, &received, bwait);
                 if (!success)
                 {
-                    print_error("Failed to read from port");
+                    spdlog::error("Failed to read from port, {} ", last_error());
                     return -1;
                 }
                 else
                 {
                     /* read immediatelly done*/
-                    
-                    print_timestamp("read after waits");
+                    spdlog::debug("read after waits");
+
                 }
                 waiting_on_read = false;
 
@@ -516,7 +515,7 @@ SSIZE_T SerialCom::read_port()
     }
 
     if (!CloseHandle(oRead.hEvent))
-        print_error("Fault when Closing Handle oRead.hEvent");
+        spdlog::error("Fault when Closing Handle oRead.hEvent , {}", last_error());
 
     return received;
 }
@@ -550,7 +549,7 @@ void SerialCom::event_callback()
     success = SetCommMask(port, dwEvtMask);
     if (!success)
     {
-        print_error("Failed to set communication mask");
+        spdlog::error("Failed to set communication mask , {}", last_error());
         return;
     }
 
@@ -559,10 +558,10 @@ void SerialCom::event_callback()
     success = GetCommMask(port, &dwEvtMask);
     if (!success)
     {
-        print_error("Failed to read communication mask");
+        spdlog::error("Failed to read communication mask, {}", last_error());
         return;
     }
-    printf("GetCommMask result: 0x%04X \n", dwEvtMask);
+    spdlog::debug("GetCommMask result {:04x}", dwEvtMask);
 
     /* handle for write operation*/
     OVERLAPPED oEvent = { 0 };
@@ -574,7 +573,7 @@ void SerialCom::event_callback()
     );
     if (!oEvent.hEvent)
     {
-        print_error("Create event failed");
+        spdlog::error("Create event failed, {}", last_error());
         return;
     }
 
@@ -588,7 +587,7 @@ void SerialCom::event_callback()
                 // leave event function if port is down
                 if (!comm_status(dwEvtMask))
                 {
-                    printf("returned from eventcall");
+                    spdlog::debug("returned from eventcall");
                     return;
                 }
                     
@@ -597,7 +596,7 @@ void SerialCom::event_callback()
             {
                 if (GetLastError() != ERROR_IO_PENDING)
                 {
-                    print_error("communication error");
+                    spdlog::error("communication error, {}", last_error());
                     break;
                 }
                 else
@@ -622,7 +621,7 @@ void SerialCom::event_callback()
                     // An error occurred in the overlappedoperation;
                     // call GetLastError to find out what itwas
                     // and abort if it is fatal.
-                    print_error("overlapped result fault");
+                    spdlog::error("overlapped result fault, {}", last_error());
                 }
                 else
                 {
@@ -631,7 +630,7 @@ void SerialCom::event_callback()
                     // leave event function if port is down
                     if (!comm_status(dwEvtMask))
                     {
-                        printf("returned from eventcall");
+                        spdlog::debug("returned from eventcall");
                         return;
                     }
                 }
@@ -647,7 +646,9 @@ void SerialCom::event_callback()
                 // Error in the WaitForSingleObject; abort
                 // This indicates a problem with the
                 CloseHandle(oEvent.hEvent);
-                print_error("Error in the WaitForSingleObject");
+
+                spdlog::error("Error in the WaitForSingleObject, {}", last_error());
+
                 break;
             }
         }

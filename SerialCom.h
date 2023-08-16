@@ -10,6 +10,8 @@
 #include <mutex>
 #include <condition_variable> // std::condition_variable
 #include <functional>
+#include "spdlog/spdlog.h" //loging
+#include "spdlog/sinks/stdout_color_sinks.h"
 
 /* typedef function wrapper to UIHandle callback*/
 typedef std::function<void(uint8_t*, int)> UIHandleCb;
@@ -52,8 +54,8 @@ private:
 	/* complementary funtion to readin operation */
 	BOOL withdraw_buffer(SSIZE_T len);
 
-	/* yields local time now */
-	void print_timestamp(const char* tag);
+	/* return last error in serial port*/
+	std::string last_error();
 
 	/* thread for event feedback */
 	std::thread event_t;
