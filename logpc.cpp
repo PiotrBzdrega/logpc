@@ -19,11 +19,14 @@ void task2(SerialCom& instance)
 }
 
 int main()
+
 {//TODO: try to use promise & future
 //TODO: add spdlog log library
+    //TODO: use [SPACE] or ~ or | [DEL] as separator in telegram
+    //TODO: resource management
+    //TODO: check continously if web-browser is switched on, to be able immediatelly enter credentials
 
-
-    /* Interface with windows API*/
+/* Interface with windows API*/
     UIHandle win;
 
     /* Serial communication with esp32*/
