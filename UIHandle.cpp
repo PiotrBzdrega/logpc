@@ -16,9 +16,19 @@ UIHandle::UIHandle()
                                   {"quora","email","password"},
                                   {"onet","email","password"},
                                   {"wp","login","password"},
-                                  {"stackoverflow","email","password"}
+                                  {"stackoverflow","email","password"},
+                                  {"siemens","login","password"}
 
     };
+
+    /* apply color for logs*/
+    spdlog::stdout_color_mt("UIHandle");
+
+#ifdef _DEBUG
+    spdlog::set_level(spdlog::level::debug);
+#else
+    spdlog::set_level(spdlog::level::error);
+#endif
 
     /* initialize domains credentials*/
     init_dict(ui_element);
@@ -31,7 +41,7 @@ UIHandle::UIHandle()
     }
     else
     {
-        printf("Failed to Create instance of UIAutomation\n");
+        spdlog::error("Failed to Create instance of UIAutomation");
     }
 }
 
@@ -57,17 +67,12 @@ UIHandle::~UIHandle()
 
 void UIHandle::prepare_notification(UI_ENUM mode,std::string domain)
 {
-    printf("before callback_t.joinable()\n");
     /* stop SerialCom callback thread if pending */
     if (callback_t.joinable())
         callback_t.join();
 
-    printf("before create_message(mode, domain)\n");
-
     /* create acknowledge message*/
     int len = create_message(mode, domain);
-
-    printf("before std::thread(callback, telegram, len);\n");
 
     /* start thread for SerialCom callback*/
     callback_t = std::thread(callback, telegram, len);
@@ -82,7 +87,7 @@ bool UIHandle::add_callback(SerialComCb callback)
 
 int UIHandle::create_message(UI_ENUM mode, std::string domain)
 {
-    printf("elements to create message: %d and %s\n",mode, domain.c_str());
+    spdlog::debug("elements to create message: {} and {}", (int)mode, domain.c_str());
 
     /* pointer for telegram*/
     uint8_t* tmp = telegram;
@@ -104,7 +109,7 @@ int UIHandle::create_message(UI_ENUM mode, std::string domain)
         *tmp = '\0';
     }
 
-    printf("created msg: %s\n", telegram);
+    spdlog::debug("created msg: {}", reinterpret_cast<char*>(telegram));
 
     /* return difference of pointers*/
     return (tmp - telegram);
@@ -113,14 +118,13 @@ int UIHandle::create_message(UI_ENUM mode, std::string domain)
 
 void UIHandle::process_data(uint8_t* buffer, size_t size)
 {
-   
-    printf("received telegram from SERIALCOM:%s \t with size:%d\n", (char*)buffer, size);
+    spdlog::debug("received telegram from SERIALCOM:{}   with size: {}", reinterpret_cast<char*>(buffer), size);
 
 
     //reinterpret uint8_t* to char* is followed by convert the char* to std::string
     std::string input(reinterpret_cast<const char*>(buffer),size);
 
-    std::cout << input<<'\n';
+    spdlog::debug("created string input: {}", input);
 
     // Regular expression pattern to match words between commas and first digit.
     std::regex pattern("^(\\d)(?:,([^,\\s]+))?(?:,([^,\\s]+))?(?:,([^,\\s]+))?$");
@@ -135,18 +139,18 @@ void UIHandle::process_data(uint8_t* buffer, size_t size)
         /* split words in match*/
         while (std::getline(ss, word, ',')) 
         {
-            std::cout << word<<'\n';
-            /*printf("%s\n", word);*/
+            spdlog::debug("new word in regex found : {}", word);
             /* add new element to list */
             telegram_part.push_back(word);            
         }
         
-        printf("received correct telegram %s, with %d elements\n", buffer, telegram_part.size());
+        spdlog::debug("received correct telegram {}, with {} elements", reinterpret_cast<char*>(buffer), telegram_part.size());
 
-        printf("regex recognized following parts:\n");
+        spdlog::debug("regex recognized following parts:");
 
-        for (size_t i = 0; i < telegram_part.size(); i++)
-            std::cout <<"element "<<i<<" "<< telegram_part[i] << '\n';
+        for (const auto& i :telegram_part)
+            spdlog::debug("element: {}",i);
+
 
         /* according regex pattern 0 element is a digit example: char '2' -> int 50. 50-48('0')=2*/
         UI_ENUM mode = static_cast<UI_ENUM>(telegram_part[0][0]-'0');
@@ -162,15 +166,18 @@ void UIHandle::process_data(uint8_t* buffer, size_t size)
             {
                 /* initialization failed*/
                 prepare_notification(UI_FAIL, "");
-                //free(buffer);
+                
+                spdlog::error("incomming message dropped without processing");
+                free(buffer);
+                return;
             }
         }
-        printf("initialization done\n");
+        spdlog::debug("initialization done");
 
         switch (mode)
         {
         case UI_DOMAIN :
-            printf("telegram requests UI_DOMAIN\n");
+            spdlog::debug("telegram requests UI_DOMAIN");
             /* stop wakeup thread if pending */
             if (wakeup_t.joinable())
                 wakeup_t.join();
@@ -181,7 +188,7 @@ void UIHandle::process_data(uint8_t* buffer, size_t size)
         case UI_LOGIN:
         case UI_PASSWORD:
 
-            printf("telegram requests %s", (mode == UI_LOGIN) ? "UI_LOGIN" : "UI_PASSWORD");
+            spdlog::debug("telegram requests {}", (mode == UI_LOGIN) ? "UI_LOGIN" : "UI_PASSWORD");
             /* following telegram should contain 3 elements in telegram*/
             if (telegram_part.size() == 3)
             {
@@ -195,18 +202,18 @@ void UIHandle::process_data(uint8_t* buffer, size_t size)
                 }
                 else
                 {
-                    printf("failed to enter %s credential\n", (mode == UI_LOGIN) ? "UI_LOGIN" : "UI_PASSWORD");
+                    spdlog::error("failed to enter {} credential", (mode == UI_LOGIN) ? "UI_LOGIN" : "UI_PASSWORD");
 
                     prepare_notification(UI_FAIL, telegram_part[1]);
                 }
             }
             else
             {
-                printf("wrong amount of elements regex found :%d :\n", telegram_part.size());
+                spdlog::error("wrong amount of elements regex found :{} ", telegram_part.size());
             }
             break;
         case UI_LOGPASS:
-            printf("telegram requests UI_LOGPASS");
+            spdlog::debug("telegram requests UI_LOGPASS");
             if (telegram_part.size() == 4)
             {
                 /* enter found login*/
@@ -222,7 +229,7 @@ void UIHandle::process_data(uint8_t* buffer, size_t size)
                     }
                     else
                     {
-                        printf("failed to enter UI_PASSWORD credential\n");
+                        spdlog::error("failed to enter UI_PASSWORD credential");
 
                         prepare_notification(UI_FAIL, telegram_part[1]);
                     }
@@ -230,14 +237,14 @@ void UIHandle::process_data(uint8_t* buffer, size_t size)
                 }
                 else
                 {
-                    printf("failed to enter UI_LOGIN credential\n");
+                    spdlog::error("failed to enter UI_LOGIN credential");
 
                     prepare_notification(UI_FAIL, telegram_part[1]);
                 }
             }
             else
             {
-                printf("wrong amount of elements regex found :%d :\n", telegram_part.size());
+                spdlog::error("wrong amount of elements regex found :{} ", telegram_part.size());
             }
                 
 
@@ -249,20 +256,20 @@ void UIHandle::process_data(uint8_t* buffer, size_t size)
         case UI_ERASE:
             break;
         case UI_MISSED:
-            printf("telegram requests UI_MISSED\n");
+            spdlog::debug("telegram requests UI_MISSED");
             break;
         default:
-            printf("unknown mode received %d\n", mode);
+            spdlog::error("unknown mode received {}", (int)mode);
             break;
         }
     }
     else
     {
-    printf("unknown message template has been received %s\n",buffer);
+        spdlog::error("unknown message template has been received {}",reinterpret_cast<char*>(buffer));
     }
 
     free(buffer);
-    return ;
+    return;
 }
 
 void UIHandle::look_for_web_field()
@@ -281,7 +288,7 @@ void UIHandle::look_for_web_field()
         // Check if the loop duration is over (5 seconds)
         if (elapsedTime >= 5)
         {
-            printf(" searching url timeout\n");
+            spdlog::error(" searching url timeout\n");
             return;
         }
 
@@ -298,14 +305,11 @@ void UIHandle::look_for_web_field()
             /* check what elements are available on site*/
             UI_ENUM element = which_element(res.domain);
 
-            printf("which_element returned\n");
 
             if (element not_eq UI_ENUM::UI_UNKNOWN)
-            {
-                printf("before prepare notification\n");
+            {;
                 /* request for credentials*/
                 prepare_notification(element, res.domain);
-                printf("after prepare notification\n");
                 return;
             }
             
@@ -332,7 +336,7 @@ bool UIHandle::initialize_instance()
         /* through 10 seconds, initialization cannot be finished*/
         if (elapsedTime >= 10)
         {
-            printf(" initialization timeout\n");
+            spdlog::error("initialization timeout");
             return false;
         }
 
@@ -342,12 +346,18 @@ bool UIHandle::initialize_instance()
             /* Window has title and is not closed/minimized */
             if (IsWindowVisible(window_handle) && !IsIconic(window_handle) && GetWindowTextLength(window_handle) > 0)
             {
-                printf("elapsedTime :%d\n", elapsedTime);
+                spdlog::debug("elapsedTime :{}", elapsedTime);
                 int c = GetWindowTextLength(window_handle);
                 //printf("%d\n", c);
                 LPWSTR pszMem = (LPWSTR)malloc(sizeof(LPWSTR) * (c + 1));
+                
                 GetWindowText(window_handle, pszMem, c + 1);
-                wprintf(L"%s\n", pszMem);
+
+                /* null terminator; GetWindowText doesn't attach it*/
+                pszMem[c] = L'\0';
+                //TODO: implement spdlog for LPWSTR
+                wprintf(L"Window Text: %s", pszMem);
+
                 free(pszMem);
 
                 break;
@@ -360,14 +370,13 @@ bool UIHandle::initialize_instance()
         window_handle = FindWindowEx(nullptr, child_handl, L"Chrome_WidgetWin_1", nullptr);
         if (!window_handle)
         {
-            printf("handle from FindWindowEx is nullptr\n");
+            spdlog::error("handle from FindWindowEx is nullptr");
             return false;
         }
         
     }
 
-    printf("%p\n", root.p);
-    printf("%p\n", uia.p);
+    spdlog::debug("root pointer :{}, uia pointer :{}", static_cast<void*>(root.p), static_cast<void*>(uia.p));
 
         root = nullptr;
 
@@ -422,7 +431,7 @@ char* UIHandle::domain_recognition(const char* url,const char* req_dom)
             last_let = i;
             char* page = _strdup(&url[first_let]);
             page[last_let - first_let] = '\0';
-            printf("%s\n", page);
+            spdlog::debug("{}", page);
 
             if (lookup(page))
             {
@@ -441,7 +450,7 @@ char* UIHandle::domain_recognition(const char* url,const char* req_dom)
                     hit = true;
                     domain = page;
                 }               
-                printf("hit hashtable\n");
+                spdlog::debug("hit hashtable");
             }
             else
             {
@@ -449,7 +458,7 @@ char* UIHandle::domain_recognition(const char* url,const char* req_dom)
                 free(page);
                 page = nullptr;
 
-                printf("miss hashtable\n");
+                spdlog::debug("miss hashtable");
             }
 
             //printf("%s\n", strcmp(page, "yandex")==0 ? "success" : "miss");
@@ -476,12 +485,13 @@ ret_url UIHandle::find_url(const char* req_dom)
     CComPtr<IUIAutomationElementArray> arr;
     if FAILED(root->FindAll(TreeScope_Children, pane_cond, &arr))
     {
-        printf("### root cannot find correct element\n");
+
+        spdlog::error("root cannot find correct element");
         return (res=ERR);
     }
     int count = 0;
     arr->get_Length(&count);
-    printf("editable_length:%d\n", count);
+    spdlog::debug("editable_length:{}", count);
 
     for (int i = 0; i < count; i++)
     {
@@ -501,7 +511,7 @@ ret_url UIHandle::find_url(const char* req_dom)
 
     if (!pane)
     {
-        printf("### pointer error: pane is nullptr\n");
+        spdlog::error("pointer error: pane is nullptr");
         return (res = ERR);
     }
         
@@ -512,14 +522,14 @@ ret_url UIHandle::find_url(const char* req_dom)
         CComVariant(UIA_EditControlTypeId), &url_cond);
     if FAILED(pane->FindFirst(TreeScope_Descendants, url_cond, &url))
     {
-        printf("### pane cannot find correct element\n");
+        spdlog::error("pane cannot find correct element");
         return (res = ERR);
     }
         
 
     if (!url)
     {
-        printf("### pointer error: url is nullptr\n");
+        spdlog::error("pointer error: url is nullptr");
         return (res = ERR);
     }
 
@@ -560,24 +570,23 @@ ret_url UIHandle::find_url(const char* req_dom)
      //TODO: here url is null pointer when brovser is not in front or minimized (but only on first shot 😐) 
     if FAILED(url->GetCurrentPropertyValue(UIA_ValueValuePropertyId, &var))
     {
-        printf("### url cannot GetCurrentPropertyValue \n");
+        spdlog::error("url cannot GetCurrentPropertyValue ");
         return (res = ERR);
     }
     if (!var.bstrVal)
     {
-        printf("### Variant string has nullpointer\n");
+        spdlog::error("Variant string has nullpointer");
         return (res = ERR);
     }
     wprintf(L"find_url: %s\n", var.bstrVal);
 
     int length = SysStringLen(var.bstrVal);
-    printf("%d\n", length);
+    spdlog::debug("{}", length);
     size_t t;
     char* mbstring = (char*)malloc(length + 1);
 
     wcstombs_s(&t, mbstring, length + 1, var.bstrVal, length);
-    printf("%jd\n", t);
-    printf("%s\n", mbstring);
+    spdlog::debug("converted string: {} size is: {}", mbstring, t);
 
     res.domain = domain_recognition(mbstring,req_dom);
 
@@ -588,7 +597,7 @@ ret_url UIHandle::find_url(const char* req_dom)
     //    return false;
     if (FAILED(url->GetCurrentPattern(UIA_ValuePatternId, (IUnknown**)&pattern)))
     {
-        printf("### url cannot GetCurrentPattern \n");
+        spdlog::error("url cannot GetCurrentPattern ");
         return (res = ERR);
     }
     //pattern->SetValue(L"google.com");
@@ -611,8 +620,7 @@ CComPtr<IUIAutomationElement> UIHandle::find_element(UI_ENUM ui, const char* dom
     struct nlist* map_entry = lookup(domain);
     if (!map_entry)
     {
-        //TODO: create global log function ("tag","message")
-        printf("#### struct nlist* allocation error: map_entry is nullptr \n");
+        spdlog::error("struct nlist* allocation error: map_entry is nullptr");
         return nullptr;
     }
 
@@ -628,14 +636,14 @@ CComPtr<IUIAutomationElement> UIHandle::find_element(UI_ENUM ui, const char* dom
 
         if (!var.bstrVal)
         {
-            printf("#### string allocation error: var.bstrVal is nullptr \n");
+            spdlog::error("string allocation error: var.bstrVal is nullptr");
             return nullptr;
         }
     }
     /* request for password field*/
     else if (ui == UI_ENUM::UI_PASSWORD)
     {
-        printf("password property\n");
+        spdlog::debug("password property");
         var.boolVal = VARIANT_TRUE;
         var.vt = VT_BOOL;
         property = UIA_IsPasswordPropertyId;
@@ -643,7 +651,7 @@ CComPtr<IUIAutomationElement> UIHandle::find_element(UI_ENUM ui, const char* dom
     /* wrong request*/
     else
     {
-        printf("#### Wrong UI_ENUM \n");
+        spdlog::error("Wrong UI_ENUM ");
         return nullptr;
     }
 
@@ -681,7 +689,7 @@ CComPtr<IUIAutomationElement> UIHandle::find_element(UI_ENUM ui, const char* dom
     SysFreeString(name);
 
 
-    printf("%p\n", element);
+    printf("%p\n", (void*)element);
     return element;
 }
 
@@ -778,7 +786,7 @@ UI_ENUM UIHandle::which_element(const char* domain)
         element->get_CurrentAutomationId(&name);
         wprintf(L"name:%ls\n", (wchar_t*)name);
         SysFreeString(name);
-        printf("%p\n", element);
+        printf("%p\n", (void*)element);
         
         //var.vt = VT_BSTR;
         //TODO: func says that fields are empty but seems to be differently 
@@ -830,7 +838,7 @@ bool UIHandle::credential(UI_ENUM ui_mode, const char* domain, const char* crede
         return false;
     }
 
-    printf("%p\n", elem);
+    printf("%p\n", (void*)elem);
 
     CComBSTR name;
     elem->get_CurrentAutomationId(&name);
