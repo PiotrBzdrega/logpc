@@ -51,7 +51,7 @@ Application LogPC must contain hardcoded AutomationID of login field for interes
 ## To be implemented
 * secure exchange credentials,
 * installable Windows application,
-* Qt+ interface with tray minimize
+* Qt+/MAUI/WPF interface with tray minimize
 * design of esp32 lego prototype,
 * esp32 on deep sleep,
 * other web browsers compatibility (edge, mozilla),
@@ -59,4 +59,6 @@ Application LogPC must contain hardcoded AutomationID of login field for interes
 * better alternative for SPP and virtual Serial Port  (Serial Port needs to be poll if device available)
 * replace the old C-syntax for >=C++11 in LogPC
 * log library in logpc
+* sub repository log3spe2
+* MAUI app instead ESP32
 
