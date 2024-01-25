@@ -11,6 +11,8 @@
 #include <sstream>
 #include <chrono>
 #include <iostream>
+#include "spdlog/spdlog.h" //loging
+#include "spdlog/sinks/stdout_color_sinks.h"
 
 /*Telegram enumeration*/
 typedef enum UI_ENUM

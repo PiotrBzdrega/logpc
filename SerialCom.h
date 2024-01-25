@@ -21,6 +21,11 @@
 #include <devguid.h>
 #include <devpkey.h>
 
+#include <bluetoothapis.h>
+#include <iostream>
+#include <string_view>
+#include <vector>
+
 /* typedef function wrapper to UIHandle callback*/
 typedef std::function<void(uint8_t*, int)> UIHandleCb;
 
@@ -80,7 +85,8 @@ private:
 public:
 
 	SerialCom(const char* device_name, uint32_t com_speed);
-	SerialCom() : SerialCom( /*"\\\\.\\COM7"*/ "\\\\?\\BTHENUM#{00001101-0000-1000-8000-00805F9B34FB}_LOCALMFG&005D#8&116EB950&0&7C9EBD4B402E_C00000000#{86e0d1e0-8089-11d0-9ce4-08003e301f73}", 9600) {};
+	SerialCom() : SerialCom( /*"\\\\.\\COM7"*/ "\\\\?\\BTHENUM#{00001101-0000-1000-8000-00805F9B34FB}_LOCALMFG&005D#8&116EB950&0&7C9EBD4B402E_C00000000#{86e0d1e0-8089-11d0-9ce4-08003e301f73}"
+		/*"BTHENUM\Dev_7C9EBD4B402E\8&52e0ba6&0&BluetoothDevice_7C9EBD4B402E"*/, 9600) {};
 	~SerialCom();
 
 	//TODO:put to private and create getter 

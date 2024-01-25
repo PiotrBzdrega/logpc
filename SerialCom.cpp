@@ -1,7 +1,6 @@
 #include "SerialCom.h"
 
 
-
 SerialCom::SerialCom(const char* device_name, uint32_t com_speed) : device{ device_name }, baud_rate{ com_speed }, port{ nullptr }, old_dwModemStatus{}
 {
     /* start port handling thread */
@@ -17,15 +16,52 @@ SerialCom::SerialCom(const char* device_name, uint32_t com_speed) : device{ devi
 #endif
 
     spdlog::debug("SerialCom instance created");
+    ///////////////////////////////////////////////////////////////////////////////////////////////
+
+     // Step 1: Initialize variables and data structures
+    HDEVINFO deviceInfoSet;
+    SP_DEVICE_INTERFACE_DATA deviceInterfaceData;
+    DWORD index = 0;
+    GUID deviceClassGuid; // This should be the GUID for the device class you are interested in.
+
+    // Replace 'your_device_class_guid_here' with the actual GUID for your device class.
+    // For example, for USB devices, you can use GUID_DEVINTERFACE_USB_DEVICE.
+    if (CLSIDFromString(L"{e0cbf06c-cd8b-4647-bb8a-263b43f0f974}", &deviceClassGuid) != S_OK) {
+        std::cerr << "Error getting device class GUID." << std::endl;
+        return;
+    }
+
+    // Step 2: Create a device information set for the specified device class
+    deviceInfoSet = SetupDiGetClassDevs(&deviceClassGuid, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+    if (deviceInfoSet == INVALID_HANDLE_VALUE) {
+        std::cerr << "Error creating device information set." << std::endl;
+        return;
+    }
+
+    // Step 3: Enumerate device interfaces
+    deviceInterfaceData.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
+    while (SetupDiEnumDeviceInterfaces(deviceInfoSet, NULL, (LPGUID)&GUID_DEVINTERFACE_COMPORT, index, &deviceInterfaceData)) {
 
 
+        // Step 4: Retrieve information about the device interface
+        // You can use this information to communicate with the device.
+        // For example, you can get the device path and open a handle to it.
+
+        // Step 5: Increment the index to enumerate the next device interface
+        index++;
+    }
+
+    // Step 6: Cleanup
+    SetupDiDestroyDeviceInfoList(deviceInfoSet);
+    spdlog::debug("{}",index);
+    ////////////////////////////////////////////////////////////////////////////////////////////
     CM_NOTIFY_FILTER NotifyFilter{ 0 };
     NotifyFilter.cbSize = sizeof(NotifyFilter);
     NotifyFilter.FilterType = CM_NOTIFY_FILTER_TYPE_DEVICEINTERFACE;
     NotifyFilter.u.DeviceInterface.ClassGuid = GUID_DEVINTERFACE_COMPORT;
 
 
-
+     wchar_t guid_str[] = L"{e0cbf06c-cd8b-4647-bb8a-263b43f0f974}";
 
     //try to figure out how to read available interfaces then QT++
     CONFIGRET cr = CR_SUCCESS;
@@ -38,10 +74,10 @@ SerialCom::SerialCom(const char* device_name, uint32_t com_speed) : device{ devi
     DEVPROPTYPE PropertyType;
     ULONG PropertySize;
     DWORD Index = 0;
-
+    
     do {
         cr = CM_Get_Device_Interface_List_Size(&DeviceInterfaceListLength,
-            (LPGUID)&GUID_DEVINTERFACE_COMPORT,
+            (LPGUID)&GUID_BTHPORT_DEVICE_INTERFACE,
             NULL,
             CM_GET_DEVICE_INTERFACE_LIST_ALL_DEVICES);
 
@@ -66,7 +102,7 @@ SerialCom::SerialCom(const char* device_name, uint32_t com_speed) : device{ devi
             break;
         }
 
-        cr = CM_Get_Device_Interface_List((LPGUID)&GUID_DEVINTERFACE_COMPORT,
+        cr = CM_Get_Device_Interface_List((LPGUID)&GUID_BTHPORT_DEVICE_INTERFACE,
             NULL,
             DeviceInterfaceList,
             DeviceInterfaceListLength,
@@ -87,21 +123,21 @@ SerialCom::SerialCom(const char* device_name, uint32_t com_speed) : device{ devi
 
         PropertySize = sizeof(CurrentDevice);
         cr = CM_Get_Device_Interface_Property(CurrentInterface,
-            &DEVPKEY_Device_InstanceId,
+            &DEVPKEY_Device_ClassGuid,
             &PropertyType,
             (PBYTE)CurrentDevice,
             &PropertySize,
             0);
 
-        if (cr != CR_SUCCESS)
-        {
-            goto Exit;
-        }
+        //if (cr != CR_SUCCESS)
+        //{
+        //    goto Exit;
+        //}
 
-        if (PropertyType != DEVPROP_TYPE_STRING)
-        {
-            goto Exit;
-        }
+        //if (PropertyType != DEVPROP_TYPE_STRING)
+        //{
+        //    goto Exit;
+        //}
         wprintf(L"Property Value: %s\n", CurrentDevice);
 
 
@@ -157,7 +193,60 @@ Exit:
             0,
             DeviceInterfaceList);
     }
-    return;
+    //return;
+
+
+   
+    auto propKey{ DEVPKEY_Device_PDOName };
+    ULONG len{};
+    auto res = CM_Get_Device_ID_List_Size(&len, guid_str, CM_GETIDLIST_FILTER_CLASS | CM_GETIDLIST_FILTER_PRESENT);
+    if (res != CR_SUCCESS) {
+        std::cerr << "error num " << res << " occured\n";
+        return ;
+    }
+
+    PWSTR devIds = (PWSTR)HeapAlloc(GetProcessHeap(),
+        HEAP_ZERO_MEMORY,
+        len * sizeof(WCHAR));
+
+    if (devIds == NULL)
+    {
+        cr = CR_OUT_OF_MEMORY;
+        std::cout << "fault\n";
+        return;
+    }
+
+    res = CM_Get_Device_ID_ListW(guid_str, devIds, len, CM_GETIDLIST_FILTER_CLASS | CM_GETIDLIST_FILTER_PRESENT);
+    std::wcout << L"installed serial devices:\n";
+
+    for (CurrentInterface = devIds;
+        *CurrentInterface;
+        CurrentInterface += wcslen(CurrentInterface) + 1)
+    {
+
+        _tprintf(_T("Serial Port Interface: %s\n"), CurrentInterface);
+        DEVINST devInst{};
+
+        DEVPROPTYPE devpropt{};
+        CM_Get_DevNode_PropertyW(devInst, &propKey, &devpropt, nullptr, &len, 0);
+
+        if (res != CR_BUFFER_SMALL && res != CR_SUCCESS) {
+            std::cerr << "error " << res << "\n";
+            continue;
+            //return -1;
+        }
+        auto buffer = std::make_unique<BYTE[]>(len);
+        res = CM_Get_DevNode_PropertyW(devInst, &propKey, &devpropt, buffer.get(), &len, 0);
+        if (devpropt == DEVPROP_TYPE_STRING) {
+            const auto val = reinterpret_cast<wchar_t*>(buffer.get());
+            std::wcout << L"friendly name: " << val << L"\n\n";
+        }
+    }
+
+   
+
+
+    
 
 }
 
