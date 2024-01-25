@@ -12,6 +12,14 @@
 #include <functional>
 #include "spdlog/spdlog.h" //loging
 #include "spdlog/sinks/stdout_color_sinks.h"
+#include "cfgmgr32.h"
+#include <tchar.h>
+#include <ntddser.h>
+#include <initguid.h>
+#include <windows.h>
+#include <setupapi.h>
+#include <devguid.h>
+#include <devpkey.h>
 
 /* typedef function wrapper to UIHandle callback*/
 typedef std::function<void(uint8_t*, int)> UIHandleCb;
@@ -25,7 +33,7 @@ class SerialCom
 private:
 	/* COM ports higher than COM9 need the \\.\ prefix, which is written as
 	   "\\\\.\\" in C because we need to escape the backslashes. */
-	const char* device;;
+	const char* device;
 
 	/* Choose the baud rate(bits per second) */
 	uint32_t baud_rate;
@@ -72,7 +80,7 @@ private:
 public:
 
 	SerialCom(const char* device_name, uint32_t com_speed);
-	SerialCom() : SerialCom("\\\\.\\COM7", 9600) {};
+	SerialCom() : SerialCom( /*"\\\\.\\COM7"*/ "\\\\?\\BTHENUM#{00001101-0000-1000-8000-00805F9B34FB}_LOCALMFG&005D#8&116EB950&0&7C9EBD4B402E_C00000000#{86e0d1e0-8089-11d0-9ce4-08003e301f73}", 9600) {};
 	~SerialCom();
 
 	//TODO:put to private and create getter 

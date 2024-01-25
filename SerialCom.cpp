@@ -1,5 +1,7 @@
 #include "SerialCom.h"
 
+
+
 SerialCom::SerialCom(const char* device_name, uint32_t com_speed) : device{ device_name }, baud_rate{ com_speed }, port{ nullptr }, old_dwModemStatus{}
 {
     /* start port handling thread */
@@ -8,7 +10,155 @@ SerialCom::SerialCom(const char* device_name, uint32_t com_speed) : device{ devi
     /* apply color for logs*/
     spdlog::stdout_color_mt("SerialCom");
 
+#ifdef _DEBUG
+    spdlog::set_level(spdlog::level::debug);
+#else
+    spdlog::set_level(spdlog::level::error);
+#endif
+
     spdlog::debug("SerialCom instance created");
+
+
+    CM_NOTIFY_FILTER NotifyFilter{ 0 };
+    NotifyFilter.cbSize = sizeof(NotifyFilter);
+    NotifyFilter.FilterType = CM_NOTIFY_FILTER_TYPE_DEVICEINTERFACE;
+    NotifyFilter.u.DeviceInterface.ClassGuid = GUID_DEVINTERFACE_COMPORT;
+
+
+
+
+    //try to figure out how to read available interfaces then QT++
+    CONFIGRET cr = CR_SUCCESS;
+    PWSTR DeviceInterfaceList = NULL;
+    ULONG DeviceInterfaceListLength = 0;
+    PWSTR CurrentInterface;
+    WCHAR CurrentDevice[MAX_DEVICE_ID_LEN];
+    DEVINST Devinst = 0;
+    WCHAR DeviceDesc[2048]{};
+    DEVPROPTYPE PropertyType;
+    ULONG PropertySize;
+    DWORD Index = 0;
+
+    do {
+        cr = CM_Get_Device_Interface_List_Size(&DeviceInterfaceListLength,
+            (LPGUID)&GUID_DEVINTERFACE_COMPORT,
+            NULL,
+            CM_GET_DEVICE_INTERFACE_LIST_ALL_DEVICES);
+
+        if (cr != CR_SUCCESS)
+        {
+            break;
+        }
+
+        if (DeviceInterfaceList != NULL) {
+            HeapFree(GetProcessHeap(),
+                0,
+                DeviceInterfaceList);
+        }
+
+        DeviceInterfaceList = (PWSTR)HeapAlloc(GetProcessHeap(),
+            HEAP_ZERO_MEMORY,
+            DeviceInterfaceListLength * sizeof(WCHAR));
+
+        if (DeviceInterfaceList == NULL)
+        {
+            cr = CR_OUT_OF_MEMORY;
+            break;
+        }
+
+        cr = CM_Get_Device_Interface_List((LPGUID)&GUID_DEVINTERFACE_COMPORT,
+            NULL,
+            DeviceInterfaceList,
+            DeviceInterfaceListLength,
+            CM_GET_DEVICE_INTERFACE_LIST_ALL_DEVICES);
+    } while (cr == CR_BUFFER_SMALL);
+
+    if (cr != CR_SUCCESS)
+    {
+        goto Exit;
+    }
+
+    for (CurrentInterface = DeviceInterfaceList;
+        *CurrentInterface;
+        CurrentInterface += wcslen(CurrentInterface) + 1)
+    {
+
+        _tprintf(_T("Serial Port Interface: %s\n"), CurrentInterface);
+
+        PropertySize = sizeof(CurrentDevice);
+        cr = CM_Get_Device_Interface_Property(CurrentInterface,
+            &DEVPKEY_Device_InstanceId,
+            &PropertyType,
+            (PBYTE)CurrentDevice,
+            &PropertySize,
+            0);
+
+        if (cr != CR_SUCCESS)
+        {
+            goto Exit;
+        }
+
+        if (PropertyType != DEVPROP_TYPE_STRING)
+        {
+            goto Exit;
+        }
+        wprintf(L"Property Value: %s\n", CurrentDevice);
+
+
+        cr = CM_Get_DevNode_PropertyW(Devinst,
+            &DEVPKEY_Device_FriendlyName,
+            &PropertyType,
+            (PBYTE)DeviceDesc,
+            &PropertySize,
+            0);
+
+
+        wprintf(L"PropertyW Value: %s\n", DeviceDesc);
+
+        // Since the list of interfaces includes all interfaces, enabled or not, the
+        // device that exposed that interface may currently be non-present, so
+        // CM_LOCATE_DEVNODE_PHANTOM should be used.
+        cr = CM_Locate_DevNode(&Devinst,
+            CurrentDevice,
+            CM_LOCATE_DEVNODE_PHANTOM);
+
+        if (cr != CR_SUCCESS)
+        {
+            goto Exit;
+        }
+
+        // Query a property on the device.  For example, the device description.
+        PropertySize = sizeof(DeviceDesc);
+        cr = CM_Get_DevNode_Property(Devinst,
+            &DEVPKEY_Device_DeviceDesc,
+            &PropertyType,
+            (PBYTE)DeviceDesc,
+            &PropertySize,
+            0);
+
+        if (cr != CR_SUCCESS)
+        {
+            goto Exit;
+        }
+
+        if (PropertyType != DEVPROP_TYPE_STRING)
+        {
+            goto Exit;
+        }
+
+        Index++;
+    }
+
+Exit:
+
+    if (DeviceInterfaceList != NULL)
+    {
+        HeapFree(GetProcessHeap(),
+            0,
+            DeviceInterfaceList);
+    }
+    return;
+
 }
 
 SerialCom::~SerialCom()
@@ -230,7 +380,7 @@ BOOL SerialCom::comm_status(DWORD state)
         spdlog::debug("Provider specific event 2");
     }
 
-    spdlog::debug(comm_status);
+    spdlog::debug("comm_status");
 
     return (state & 0xFFFF);
 }
@@ -270,6 +420,20 @@ int SerialCom::open_serial_port()
         event_t = std::thread(&SerialCom::event_callback, this);
     }
     spdlog::debug("port opened succesfully");
+
+
+    //if (DeviceIoControl(
+    //    port,                        //HANDLE DEVICE
+    //    IOCTL_SERIAL_GET_WAIT_MASK,  //dwIoControlCode
+    //    NULL,                        //nInBufferSize
+    //    0,                           //lpOutBuffer
+    //    &dwWaitMask,                 //lpOutBuffer
+    //    sizeof(DWORD),               //nOutBufferSize
+    //    NULL,                        //lpBytesReturned
+    //    NULL                         //lpOverlapped
+    //)) {
+        // Use the retrieved wait mask to determine which events are being waited for
+
     // Flush away any bytes previously read or written.
     BOOL success = FlushFileBuffers(port);
     if (!success)
