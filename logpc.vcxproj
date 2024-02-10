@@ -148,12 +148,14 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="crc.cpp" />
+    <ClCompile Include="CryptoPrimitives.cpp" />
     <ClCompile Include="logpc.cpp" />
     <ClCompile Include="SerialCom.cpp" />
     <ClCompile Include="UIHandle.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="crc.h" />
+    <ClInclude Include="CryptoPrimitives.h" />
     <ClInclude Include="SerialCom.h" />
     <ClInclude Include="UIHandle.h" />
   </ItemGroup>
