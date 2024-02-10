@@ -1,0 +1,44 @@
+UIHandle
+	ctor() save credentials from JSON into ui_hashtab
+	
+SerialCom
+	ctor() starts connection_loop thread 
+	
+	connection_loop	=> tries to open port {creates handle) every 5 seconds.
+		if port is down, handle is to be closed}
+			=> starts thread event_callback when handle{port} is up {set communication mask and drop in while(1))
+			
+    event_callback => communication events recognition; e.g. calls read_port() if new data arrived
+						
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!					
+1. Application starts
+2. 						
+
+Application contains 4 handles that operates in Overlapped mode.
+
+HANDLE = opaque value that acts as a reference to a system resource, such as a file, 
+device, memory object, synchronization object, or process
+
+Overlapped means asynchronous what guarantee non blocking behaviour throughout
+(https://learn.microsoft.com/en-us/windows/win32/sync/synchronization-and-overlapped-input-and-output)
+The WriteFile, ReadFile, DeviceIoControl, WaitCommEvent, ConnectNamedPipe, 
+and TransactNamedPipe functions can be performed either synchronously or asynchronously.
+
+Main handle {port} refers to connected bletooth device,
+they are also oWrite,oRead and oEvent 
+
+
+ Example Read operation:
+	1.create read HANDLE
+	2.ReadFile with read HANDLE, {port} device HANDLE and buffer for data
+	3. WaitForSingleObject with read HANDLE and time waiting for data (500ms)
+	4. calls GetOverlappedResult() HANDLE has been signaled in 3
+	5. returns number of bytes
+	6. withdraw_buffer() takes amount of bytes and starts new thread with process_data()
+
+Process make use of x threads:
+- handle_t
+- event_t
+- callback_t
+
+Microsoft Component Object Model which area of program leverages it ??

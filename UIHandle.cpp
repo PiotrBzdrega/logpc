@@ -2,47 +2,63 @@
 
 UIHandle::UIHandle()
 {
-    //TODO: attach it as part of object instance
-    IUIAutomationMap ui_element[HASHSIZE] = { {"github","login_field","password"},
-                                  {"etutor","login","haslo"},
-                                  {"facebook","email","pass"},
-                                  {"centrum24","input_nik","ordinarypin"},
-                                  {"google", "identifierId", ""}, //"passwordId"},
-                                  {"yandex","passp-field-login","passp-field-passwd"},
-                                  {"linkedin","username","password"},
-                                  {"soundcloud","sign_in_up_email","password"},
-                                  {"wikipedia","wpName1","wpPassword"},
-                                  {"facebook","email",""},
-                                  {"quora","email","password"},
-                                  {"onet","email","password"},
-                                  {"wp","login","password"},
-                                  {"stackoverflow","email","password"},
-                                  {"siemens","login","password"}
-
-    };
-
     /* apply color for logs*/
     spdlog::stdout_color_mt("UIHandle");
 
+
+    std::ifstream jsonFileStream("./credentials.json");
+    if (!jsonFileStream.is_open())
+    {
+        spdlog::error("missing .json file with credentials");
+    }
+    else
+    {
+        nlohmann::json jsonData = nlohmann::json::parse(jsonFileStream);
+
+        // Process the JSON data
+        std::vector<UICredential> credentialsList;
+        for (const auto& entry : jsonData) {
+            UICredential credentials;
+
+            credentials.ui_domain = entry["domain"];
+
+            credentials.ui_login = entry["login"];
+
+            credentials.ui_password = entry["password"];
+             
+            credentialsList.push_back(credentials);
+        }
+
+        //TODO: 
+        /* initialize domains credentials*/
+        ui_init_dict(credentialsList);
+    }
+    
 #ifdef _DEBUG
     spdlog::set_level(spdlog::level::debug);
 #else
     spdlog::set_level(spdlog::level::error);
 #endif
 
-    /* initialize domains credentials*/
-    init_dict(ui_element);
 
-    //TODO: comment
-    HRESULT res = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    if SUCCEEDED(uia.CoCreateInstance(CLSID_CUIAutomation))
+
+    /* CoInitializeEx() Initializes the COM library for use by the calling thread,
+       sets the thread's concurrency model, and creates a new apartment for the thread 
+
+       https://learn.microsoft.com/en-us/windows/win32/api/objbase/ne-objbase-coinit  says that
+       for GUI I should use COINIT_APARTMENTTHREADED instead COINIT_MULTITHREADED*/ 
+
+    /* CoCreateInstance() create an instance of a COM class identified by its CLSID (Class Identifier). 
+    CLSIDs uniquely identify COM classes and are typically stored in the Windows registry. */
+    if (CoInitializeEx(nullptr, COINIT_MULTITHREADED) == S_OK && SUCCEEDED(uia.CoCreateInstance(CLSID_CUIAutomation)))
     {
-        ;
+        spdlog::debug("Instance of UIAutomation successfully created");
     }
     else
     {
         spdlog::error("Failed to Create instance of UIAutomation");
     }
+
 }
 
 UIHandle::~UIHandle()
@@ -58,7 +74,8 @@ UIHandle::~UIHandle()
     /* release smart pointer*/
     uia.Release();
 
-    //TODO: comment
+    /* Closes the COM library on the current thread, unloads all DLLs loaded by the thread,
+       frees any other resources that the thread maintains, and forces all RPC connections on the thread to close. */
     CoUninitialize();
 
     /* release domains credentials*/
@@ -116,23 +133,27 @@ int UIHandle::create_message(UI_ENUM mode, std::string domain)
 }
 
 
-void UIHandle::process_data(uint8_t* buffer, size_t size)
+void UIHandle::process_data(std::string authorization)
 {
-    spdlog::debug("received telegram from SERIALCOM:{}   with size: {}", reinterpret_cast<char*>(buffer), size);
-
+    //spdlog::debug("received telegram from SERIALCOM:{}   with size: {}", reinterpret_cast<char*>(buffer), size);
 
     //reinterpret uint8_t* to char* is followed by convert the char* to std::string
-    std::string input(reinterpret_cast<const char*>(buffer),size);
+    //std::string input(reinterpret_cast<const char*>(buffer),size);
 
-    spdlog::debug("created string input: {}", input);
+    //release pointer to credentials
+    //free(buffer);
+
+    spdlog::debug("received telegram from SERIALCOM:{} ", authorization);
+    //spdlog::debug("created string input: {}", input);
+
 
     // Regular expression pattern to match words between commas and first digit.
     std::regex pattern("^(\\d)(?:,([^,\\s]+))?(?:,([^,\\s]+))?(?:,([^,\\s]+))?$");
 
     /* check if pattern covers input */
-    if (std::regex_match(input, pattern))
+    if (std::regex_match(authorization, pattern))
     {
-        std::stringstream ss(input);
+        std::stringstream ss(authorization);
         std::string word;
 
         std::vector <std::string> telegram_part;
@@ -144,13 +165,12 @@ void UIHandle::process_data(uint8_t* buffer, size_t size)
             telegram_part.push_back(word);            
         }
         
-        spdlog::debug("received correct telegram {}, with {} elements", reinterpret_cast<char*>(buffer), telegram_part.size());
+        spdlog::debug("received correct telegram {0}, with {1} element{2}", authorization, telegram_part.size(), (telegram_part.size() > 1) ? "s" : "");
 
         spdlog::debug("regex recognized following parts:");
 
         for (const auto& i :telegram_part)
             spdlog::debug("element: {}",i);
-
 
         /* according regex pattern 0 element is a digit example: char '2' -> int 50. 50-48('0')=2*/
         UI_ENUM mode = static_cast<UI_ENUM>(telegram_part[0][0]-'0');
@@ -168,7 +188,6 @@ void UIHandle::process_data(uint8_t* buffer, size_t size)
                 prepare_notification(UI_FAIL, "");
                 
                 spdlog::error("incomming message dropped without processing");
-                free(buffer);
                 return;
             }
         }
@@ -265,10 +284,9 @@ void UIHandle::process_data(uint8_t* buffer, size_t size)
     }
     else
     {
-        spdlog::error("unknown message template has been received {}",reinterpret_cast<char*>(buffer));
+        spdlog::error("unknown message template has been received {}", authorization);
     }
 
-    free(buffer);
     return;
 }
 
@@ -288,7 +306,7 @@ void UIHandle::look_for_web_field()
         // Check if the loop duration is over (5 seconds)
         if (elapsedTime >= 5)
         {
-            spdlog::error(" searching url timeout\n");
+            spdlog::error(" searching url timeout");
             return;
         }
 
@@ -346,7 +364,7 @@ bool UIHandle::initialize_instance()
             /* Window has title and is not closed/minimized */
             if (IsWindowVisible(window_handle) && !IsIconic(window_handle) && GetWindowTextLength(window_handle) > 0)
             {
-                spdlog::debug("elapsedTime :{}", elapsedTime);
+                spdlog::debug("elapsedTime: {}seconds", elapsedTime);
                 int c = GetWindowTextLength(window_handle);
                 //printf("%d\n", c);
                 LPWSTR pszMem = (LPWSTR)malloc(sizeof(LPWSTR) * (c + 1));
@@ -366,6 +384,7 @@ bool UIHandle::initialize_instance()
 
         HWND child_handl = nullptr; // always nullptr
 
+        /* Windows API function used to retrieve a handle to a child window */
         /* check if some window has className "Chrome_WidgetWin_1"*/
         window_handle = FindWindowEx(nullptr, child_handl, L"Chrome_WidgetWin_1", nullptr);
         if (!window_handle)
@@ -433,7 +452,7 @@ char* UIHandle::domain_recognition(const char* url,const char* req_dom)
             page[last_let - first_let] = '\0';
             spdlog::debug("{}", page);
 
-            if (lookup(page))
+            if (ui_lookup(page))
             {
                 /* requested domain page has some characters*/
                 if (req_dom!="")
@@ -617,10 +636,10 @@ CComPtr<IUIAutomationElement> UIHandle::find_element(UI_ENUM ui, const char* dom
     CComPtr<IUIAutomationCondition> pane_cond;
     CComVariant var;
     HRESULT res;
-    struct nlist* map_entry = lookup(domain);
+    std::shared_ptr<ui_nlist> map_entry = ui_lookup(domain);
     if (!map_entry)
     {
-        spdlog::error("struct nlist* allocation error: map_entry is nullptr");
+        spdlog::error("shared_ptr<ui_nlist> allocation error: map_entry is nullptr");
         return nullptr;
     }
 
@@ -630,7 +649,7 @@ CComPtr<IUIAutomationElement> UIHandle::find_element(UI_ENUM ui, const char* dom
     /* request for login field*/
     if (ui == UI_ENUM::UI_LOGIN)
     {
-        var.bstrVal = SysAllocString(CA2W(map_entry->defn.login));
+        var.bstrVal = SysAllocString(CA2W(map_entry->defn.ui_login.c_str()));
         wprintf(L"allocated String: %ls\n", var.bstrVal);
         var.vt = VT_BSTR;
 
@@ -658,7 +677,7 @@ CComPtr<IUIAutomationElement> UIHandle::find_element(UI_ENUM ui, const char* dom
     res = uia->CreatePropertyCondition(property, var, &pane_cond);
     if FAILED(res)
     {
-        printf("#### condition property creation error: CreatePropertyCondition() returns %08x \n", res);
+        spdlog::error("#### condition property creation error: CreatePropertyCondition() returns %08x \n", res);
         pane_cond.Release();
         return nullptr;
     }
@@ -671,14 +690,14 @@ CComPtr<IUIAutomationElement> UIHandle::find_element(UI_ENUM ui, const char* dom
     res = root->FindFirst(TreeScope_Descendants, pane_cond, &element);
     if FAILED(res)
     {
-        printf("#### finding error: FindFirst() returns %08x \n", res);
+        spdlog::error("#### finding error: FindFirst() returns %08x \n", res);
         pane_cond.Release();
         return nullptr;
     }
 
     if (!element)
     {
-        printf("#### element allocation error: element is nullptr \n");
+        spdlog::error("#### element allocation error: element is nullptr \n");
         return nullptr;
     }
 
@@ -688,8 +707,8 @@ CComPtr<IUIAutomationElement> UIHandle::find_element(UI_ENUM ui, const char* dom
     wprintf(L"name:%ls\n", (wchar_t*)name);
     SysFreeString(name);
 
-
-    printf("%p\n", (void*)element);
+    
+    spdlog::debug("[{}] found element address:{}", std::string(__FUNCTION__), static_cast<void*>(element));
     return element;
 }
 
@@ -700,10 +719,10 @@ UI_ENUM UIHandle::which_element(const char* domain)
     // This contains the toolbar. Find this "Google Chrome" element:
     
     UI_ENUM ret_val= UI_ENUM::UI_UNKNOWN;
-    struct nlist* map_entry = lookup(domain);
+    std::shared_ptr<ui_nlist> map_entry = ui_lookup(domain);
     if (!map_entry)
     {
-        printf("#### struct nlist* allocation error: map_entry is nullptr \n");
+        spdlog::error("#### shared_ptr<ui_nlist> allocation error: map_entry is nullptr \n");
         return UI_ENUM::UI_UNKNOWN;
     }
 
@@ -719,20 +738,20 @@ UI_ENUM UIHandle::which_element(const char* domain)
 
         if (ui == UI_ENUM::UI_LOGIN)
         {
-            var.bstrVal = SysAllocString(CA2W(map_entry->defn.login));
+            var.bstrVal = SysAllocString(CA2W(map_entry->defn.ui_login.c_str()));
             wprintf(L"allocated String: %ls\n", var.bstrVal);
             var.vt = VT_BSTR;
             property = UIA_AutomationIdPropertyId;
 
             if (!var.bstrVal)
             {
-                printf("#### string allocation error: var.bstrVal is nullptr \n");
+                spdlog::error("#### string allocation error: var.bstrVal is nullptr \n");
                 continue;
             }
         }
         else if (ui == UI_ENUM::UI_PASSWORD)
         {
-            printf("password property\n");
+            spdlog::debug("password property\n");
             var.boolVal = VARIANT_TRUE;
             var.vt = VT_BOOL;
             property = UIA_IsPasswordPropertyId;
@@ -770,14 +789,14 @@ UI_ENUM UIHandle::which_element(const char* domain)
         if FAILED(res)
         {
                 
-            printf("#### finding error: FindFirst() returns %08x \n", res);
+            spdlog::error("#### finding error: FindFirst() returns %08x \n", res);
             pane_cond.Release();
             continue;
         }
 
         if (!element)
         {              
-            printf("#### element allocation error: element is nullptr \n");
+            spdlog::error("#### element allocation error: element is nullptr \n");
             continue;
         }
 
@@ -786,7 +805,7 @@ UI_ENUM UIHandle::which_element(const char* domain)
         element->get_CurrentAutomationId(&name);
         wprintf(L"name:%ls\n", (wchar_t*)name);
         SysFreeString(name);
-        printf("%p\n", (void*)element);
+        spdlog::debug("{}", static_cast<void*>(element));
         
         //var.vt = VT_BSTR;
         //TODO: func says that fields are empty but seems to be differently 
@@ -826,7 +845,7 @@ bool UIHandle::credential(UI_ENUM ui_mode, const char* domain, const char* crede
     ret_url url = find_url(domain);
     if (!url.domain)
     {
-        printf("#### finding requested url error \n");
+        spdlog::error("#### finding requested url error");
         return false;
     }
 
@@ -834,11 +853,11 @@ bool UIHandle::credential(UI_ENUM ui_mode, const char* domain, const char* crede
 
     if (!elem)
     {
-        printf("#### element finding error: %s for [%s] domain has not been found \n", (ui_mode == 1) ? "login" : "password", domain);
+        spdlog::error("#### element finding error: {} for [{}] domain has not been found \n", (ui_mode == 1) ? "login" : "password", domain);
         return false;
     }
 
-    printf("%p\n", (void*)elem);
+    spdlog::debug("[{}] found element address:{}", std::string(__FUNCTION__), static_cast<void*>(elem));
 
     CComBSTR name;
     elem->get_CurrentAutomationId(&name);
@@ -863,11 +882,11 @@ bool UIHandle::credential(UI_ENUM ui_mode, const char* domain, const char* crede
     errno_t res = (mbstowcs_s(&t, w_text, len + 1, credential, len));
     if (res)
     {
-        printf("### conversion error: mbstowcs_s() returns %d  \n", res);
+        spdlog::error("### conversion error: mbstowcs_s() returns {}  ", res);
         return false;
     }
 
-    printf("converted characters:%I64u\n", t);
+    spdlog::debug("converted characters:{}", t);
     wprintf(L"%s\n", w_text);
 
     IValueProvider* pattern = nullptr;
@@ -876,7 +895,7 @@ bool UIHandle::credential(UI_ENUM ui_mode, const char* domain, const char* crede
 
     if (!pattern)
     {
-        printf("### pointer error: pattern is nullptr  \n");
+        spdlog::error("### pointer error: pattern is nullptr  \n");
         return false;
     }
 
@@ -886,21 +905,23 @@ bool UIHandle::credential(UI_ENUM ui_mode, const char* domain, const char* crede
 
     if FAILED(elem->GetCurrentPropertyValue(UIA_ValueValuePropertyId, &var))
     {
-        printf("### GetCurrentPropertyValue error: cannot check inserted credential \n");
+        spdlog::error("### GetCurrentPropertyValue error: cannot check inserted credential \n");
         return false;
     }
        
     if (!var.bstrVal)
     {
-        printf("### string allocation memory error: !var.bstrVal is nullptr \n");
+        spdlog::error("### string allocation memory error: !var.bstrVal is nullptr \n");
         return false;
     }
 
     wprintf(L"inserted content: %s\n", var.bstrVal);
 
+
+
     if (w_text != var.bstrVal)
     {
-        printf("### set text is not same like get \n");
+        spdlog::error("### set text is not same like get \n");
         //TODO: return fault if texts are not the same
         //return false;
     }
@@ -911,14 +932,14 @@ bool UIHandle::credential(UI_ENUM ui_mode, const char* domain, const char* crede
     VARIANT_BOOL hasKeyboardFocus;
     if FAILED(elem->GetCurrentPropertyValue(UIA_HasKeyboardFocusPropertyId, &var))
     {
-        printf("### GetCurrentPropertyValue error: cannot check if element HasKeyboardFocus\n");
+        spdlog::error("### GetCurrentPropertyValue error: cannot check if element HasKeyboardFocus\n");
         //return false;
     }
 
     if (var.boolVal == VARIANT_TRUE) 
-        printf("The element has keyboard focus.");
+        spdlog::debug("The element has keyboard focus.");
     else 
-        printf("The element does not have keyboard focus.");
+        spdlog::debug("The element does not have keyboard focus.");
     
     pattern->Release();
     free(w_text);
@@ -927,6 +948,6 @@ bool UIHandle::credential(UI_ENUM ui_mode, const char* domain, const char* crede
 
     elem.Release();
 
-    printf("finished succesfully\n");
+    spdlog::debug("finished succesfully\n");
     return true;
 }

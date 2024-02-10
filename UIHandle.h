@@ -11,8 +11,10 @@
 #include <sstream>
 #include <chrono>
 #include <iostream>
+#include <fstream>
 #include "spdlog/spdlog.h" //loging
 #include "spdlog/sinks/stdout_color_sinks.h"
+#include "external/nlohmann/json.hpp" //json parser
 
 /*Telegram enumeration*/
 typedef enum UI_ENUM
@@ -107,7 +109,7 @@ public:
 	~UIHandle();
 
 	/* process data received from peripheral*/
-	void process_data(uint8_t* buffer, size_t size);
+	void process_data(std::string authorization);
 
 	/* assign callback to class */
 	bool add_callback(SerialComCb callback);
