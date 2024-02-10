@@ -27,12 +27,12 @@
 #include <vector>
 
 /* typedef function wrapper to UIHandle callback*/
-typedef std::function<void(uint8_t*, int)> UIHandleCb;
+typedef std::function<void(std::string)> UIHandleCb;
 
 constexpr int BUFFER_LEN = 1024;
 
 /* base on https://www.pololu.com/docs/0J73/15.6 
-       nad http://www.egmont.com.pl/addi-data/instrukcje/standard_driver.pdf */
+       and http://www.egmont.com.pl/addi-data/instrukcje/standard_driver.pdf */
 class SerialCom
 {
 private:
@@ -85,6 +85,8 @@ private:
 public:
 
 	SerialCom(const char* device_name, uint32_t com_speed);
+
+	//TODO: from where device name comes from and what basically defines this speed
 	SerialCom() : SerialCom( /*"\\\\.\\COM7"*/ "\\\\?\\BTHENUM#{00001101-0000-1000-8000-00805F9B34FB}_LOCALMFG&005D#8&116EB950&0&7C9EBD4B402E_C00000000#{86e0d1e0-8089-11d0-9ce4-08003e301f73}"
 		/*"BTHENUM\Dev_7C9EBD4B402E\8&52e0ba6&0&BluetoothDevice_7C9EBD4B402E"*/, 9600) {};
 	~SerialCom();

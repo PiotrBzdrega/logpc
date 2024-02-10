@@ -29,13 +29,15 @@ int main()
 /* Interface with windows API*/
     UIHandle win;
 
-    /* Serial communication with esp32*/
-    SerialCom esp;
+    /* Serial communication with esp32,
+       handle_t try to keep connection up
+       through connection_loop() */
+    SerialCom esp; 
 
     /* callback to send telegram*/
     win.add_callback([&esp](uint8_t* buffer, size_t size) {return esp.write_port(buffer, size); });
 
     /* callback to process received telegram*/
-    esp.add_callback([&win](uint8_t* buffer, size_t size) {return win.process_data(buffer, size); });
+    esp.add_callback([&win](std::string credential) {return win.process_data(credential); });
 
 }

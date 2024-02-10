@@ -2,6 +2,18 @@
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
+#include <string>
+#include <memory>
+#include <vector>
+#include "spdlog/spdlog.h" //loging
+#include "spdlog/sinks/stdout_color_sinks.h"
+
+
+//#ifdef _DEBUG
+//spdlog::set_level(spdlog::level::debug);
+//#else
+//spdlog::set_level(spdlog::level::error);
+//#endif
 
 /* crc32 precomputed table */
 static const unsigned int crc_table[256] = { // Table of 8-bit remainders
@@ -62,6 +74,19 @@ typedef union IUIAutomationMap
 
 }IUIAutomationMap;
 
+typedef struct UICredential
+{
+	std::string ui_domain;
+	std::string ui_login;
+	std::string ui_password;
+};
+
+struct ui_nlist { /* table entry: */
+	struct std::shared_ptr<ui_nlist> next; /* next entry in chain */
+	UICredential defn; /* value */
+};
+
+
 /* struct for associative array */
 struct nlist { /* table entry: */
 	struct nlist* next; /* next entry in chain */
@@ -87,3 +112,22 @@ void init_dict(IUIAutomationMap ui_map[]);
 
 /* release memory for all entries */
 void release_dict();
+
+
+/*++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++*/
+
+
+/* pointer table to store all credentials*/
+static std::shared_ptr<ui_nlist> ui_hashtab[HASHSIZE];
+
+/* crc32 hashfunction */
+unsigned int ui_hash(const std::string &data_blk_ptr, unsigned int hash_size);
+
+/* lookup for s in hashtable */
+std::shared_ptr<ui_nlist> ui_lookup(const std::string &dm);
+
+/* add new entry in hashtab */
+void ui_install(UICredential ui_map);
+
+/* initialize ui map entries */
+void ui_init_dict(const std::vector<UICredential> &credentials);

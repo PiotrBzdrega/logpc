@@ -19,6 +19,12 @@ SerialCom::SerialCom(const char* device_name, uint32_t com_speed) : device{ devi
     ///////////////////////////////////////////////////////////////////////////////////////////////
 
      // Step 1: Initialize variables and data structures
+
+    /* The class identifier (CLSID) is a class that can display and/or 
+    provide programmatic access to the property values.*/
+    /* This class includes all Bluetooth devices. */
+    const wchar_t* blthClsid = L"{e0cbf06c-cd8b-4647-bb8a-263b43f0f974}";
+
     HDEVINFO deviceInfoSet;
     SP_DEVICE_INTERFACE_DATA deviceInterfaceData;
     DWORD index = 0;
@@ -26,7 +32,7 @@ SerialCom::SerialCom(const char* device_name, uint32_t com_speed) : device{ devi
 
     // Replace 'your_device_class_guid_here' with the actual GUID for your device class.
     // For example, for USB devices, you can use GUID_DEVINTERFACE_USB_DEVICE.
-    if (CLSIDFromString(L"{e0cbf06c-cd8b-4647-bb8a-263b43f0f974}", &deviceClassGuid) != S_OK) {
+    if (CLSIDFromString(blthClsid, &deviceClassGuid) != S_OK) {
         std::cerr << "Error getting device class GUID." << std::endl;
         return;
     }
@@ -53,7 +59,7 @@ SerialCom::SerialCom(const char* device_name, uint32_t com_speed) : device{ devi
 
     // Step 6: Cleanup
     SetupDiDestroyDeviceInfoList(deviceInfoSet);
-    spdlog::debug("{}",index);
+    spdlog::debug("indexes:{}",index);
     ////////////////////////////////////////////////////////////////////////////////////////////
     CM_NOTIFY_FILTER NotifyFilter{ 0 };
     NotifyFilter.cbSize = sizeof(NotifyFilter);
@@ -61,7 +67,7 @@ SerialCom::SerialCom(const char* device_name, uint32_t com_speed) : device{ devi
     NotifyFilter.u.DeviceInterface.ClassGuid = GUID_DEVINTERFACE_COMPORT;
 
 
-     wchar_t guid_str[] = L"{e0cbf06c-cd8b-4647-bb8a-263b43f0f974}";
+     
 
     //try to figure out how to read available interfaces then QT++
     CONFIGRET cr = CR_SUCCESS;
@@ -199,7 +205,7 @@ Exit:
    
     auto propKey{ DEVPKEY_Device_PDOName };
     ULONG len{};
-    auto res = CM_Get_Device_ID_List_Size(&len, guid_str, CM_GETIDLIST_FILTER_CLASS | CM_GETIDLIST_FILTER_PRESENT);
+    auto res = CM_Get_Device_ID_List_Size(&len, blthClsid, CM_GETIDLIST_FILTER_CLASS | CM_GETIDLIST_FILTER_PRESENT);
     if (res != CR_SUCCESS) {
         std::cerr << "error num " << res << " occured\n";
         return ;
@@ -216,7 +222,7 @@ Exit:
         return;
     }
 
-    res = CM_Get_Device_ID_ListW(guid_str, devIds, len, CM_GETIDLIST_FILTER_CLASS | CM_GETIDLIST_FILTER_PRESENT);
+    res = CM_Get_Device_ID_ListW(blthClsid, devIds, len, CM_GETIDLIST_FILTER_CLASS | CM_GETIDLIST_FILTER_PRESENT);
     std::wcout << L"installed serial devices:\n";
 
     for (CurrentInterface = devIds;
@@ -312,14 +318,14 @@ std::string SerialCom::last_error()
 
 BOOL SerialCom::withdraw_buffer(SSIZE_T len)
 {
-    spdlog::debug("received telegram:{}  with size:{1}", (char*)read_buffer,len);
+    spdlog::debug("received telegram:{0} with size:{1}", (char*)read_buffer,len);
 
     /* allocate memory for new telegram +1 for null terminator*/
-    uint8_t* credential = (uint8_t*)malloc(len+1);
+    /*uint8_t* credential = (uint8_t*)malloc(len+1);*/
 
     /* copy all telegram from buffer*/
-    for (SSIZE_T i = 0; i < len; i++)
-        credential[i] = read_buffer[i];
+    //for (SSIZE_T i = 0; i < len; i++)
+    //    credential[i] = read_buffer[i];
         
     /* null terminator in case of printf*/
     //credential[len] = '\0';
@@ -329,7 +335,7 @@ BOOL SerialCom::withdraw_buffer(SSIZE_T len)
         callback_t.join();
 
     /* start thread for UIHandle thread*/
-    callback_t = std::thread(callback, credential, static_cast<int>(len));
+    callback_t = std::thread(callback, std::string(reinterpret_cast<char*>(read_buffer), len));
 
     return true;
 }
@@ -368,7 +374,7 @@ BOOL SerialCom::comm_status(DWORD state)
         }       
         if (old_dwModemStatus != dwModemStatus)
         {
-            spdlog::debug("new modem status {:08x}", dwModemStatus);
+            spdlog::debug("new modem status 0x{:04x}", dwModemStatus);
             newModemStatus = true;
         }
         old_dwModemStatus = dwModemStatus;
@@ -421,7 +427,7 @@ BOOL SerialCom::comm_status(DWORD state)
     if (state & EV_RXCHAR)
     {
         spdlog::debug("Any Character received");
-        SSIZE_T received= read_port();
+        SSIZE_T received = read_port();
         if (received)
         {
             withdraw_buffer(received);
@@ -582,8 +588,11 @@ void SerialCom::connection_loop()
         open_serial_port();
 
         std::this_thread::sleep_for(std::chrono::seconds(5));
+        //TODO:what is it
         /* till port is down*/
         std::unique_lock<decltype(mtx)> lk(mtx);
+
+        //TODO:what is it
         cv.wait(lk, [this]() {return port_down; });
         
         close_handle();
@@ -613,7 +622,8 @@ void SerialCom::write_port(uint8_t* buffer, size_t size)
         //TODO: return with fault after some time or event
 
 
-
+    /* OVERLAPPED structure is used for asynchronous I / O operations,
+       allowing you to perform I / O operations in a non - blocking manner. */
     /* handle for write operation*/
     OVERLAPPED oWrite={0};
     DWORD written;
@@ -645,18 +655,25 @@ void SerialCom::write_port(uint8_t* buffer, size_t size)
             /* write is pending*/
 
             /* wait infinite time*/
+
+            /* If the object's state is nonsignaled, 
+            the calling thread enters the wait state until the object
+            is signaled or the time-out interval elapses. */
+            /* If dwMilliseconds is INFINITE, 
+            the function will return only when the object is signaled.*/
+            //TODO: why we wait infinite amount of time for write?
             DWORD dwRes = WaitForSingleObject(oWrite.hEvent,INFINITE);
 
             switch (dwRes)
-            {
-                /*  OVERLAPPED structure's event has been signaled.*/
-                case WAIT_OBJECT_0:
+            {          
+                case WAIT_OBJECT_0: /*  OVERLAPPED event Event has been signaled.*/
                     success = GetOverlappedResult(port, &oWrite, &written, bwait);
                     if (!success)
                         res = false;
                     else
                     {
                         res = true;
+                        // check if all data has been sent
                         if (written != size)
                         {
                             spdlog::error("Failed to write all bytes to port written:{}, size:{} , {}", written, size, last_error());
@@ -669,7 +686,7 @@ void SerialCom::write_port(uint8_t* buffer, size_t size)
                     }
                 break;
             default:
-                spdlog::error("Problem with OVERLAPPED event handle , {}", last_error());
+                spdlog::error("WaitForSingleObject() function has failed with Write HANDLE, {} ", last_error());
                 res = false;
                 break;
             }
@@ -688,10 +705,16 @@ SSIZE_T SerialCom::read_port()
     DWORD received=0;
     SSIZE_T res = -1;
     BOOL waiting_on_read = FALSE;
-    /* handle for read operation*/
+
+    /* OVERLAPPED structure is used for asynchronous I / O operations, 
+       allowing you to perform I / O operations in a non - blocking manner. */   
+    /* handle for read operation */
     OVERLAPPED oRead = { 0 };
     bool bwait = false;
 
+    /* used to create a synchronization event object. 
+       Event objects are synchronization primitives used for inter-process or 
+       inter-thread communication to notify when an event has occurred. */
     oRead.hEvent = CreateEvent(
     NULL,   // default security attributes 
     TRUE,   // manual-reset event 
@@ -732,12 +755,16 @@ SSIZE_T SerialCom::read_port()
     {
         DWORD dwRead;
         DWORD dwRes;
+
+        /* If the object's state is nonsignaled,
+           the calling thread enters the wait state until the object
+           is signaled or the time-out interval elapses. */
         dwRes = WaitForSingleObject(oRead.hEvent, READ_TIMEOUT);
         BOOL success;
 
         switch (dwRes)
         {
-            case WAIT_OBJECT_0:
+            case WAIT_OBJECT_0: /* The state of the specified object is signaled. */
 
                 success = GetOverlappedResult(port, &oRead, &received, bwait);
                 if (!success)
@@ -752,17 +779,21 @@ SSIZE_T SerialCom::read_port()
 
                 }
                 waiting_on_read = false;
+                break;
 
-            case WAIT_TIMEOUT:
+                //TODO: seems that this must be inside while loop till return from WaitForSingleObject will be not time-out
+            case WAIT_TIMEOUT: /* The time-out interval elapsed, and the object's state is nonsignaled. */
                 // Operation isn't complete yet. fWaitingOnRead flag isn't
                 // changed since I'll loop back around, and I don't want
                 // to issue another read until the first one finishes.
+                spdlog::error("ReadFile not finished succesfully => WAIT_TIMEOUT, it must be fixed (loop) TODO!!!!!!!!!!!!!!!!!! ");               
                 break;
 
             default:
-                // Error in the WaitForSingleObject; abort.
+                // Error in the WaitForSingleObject probably WAIT_FAILED; abort.
                 // This indicates a problem with the OVERLAPPED structure's
                 // event handle.
+                spdlog::error("WaitForSingleObject() function has failed with Read HANDLE, {} ", last_error());
                 break;
         }
     }
@@ -814,7 +845,10 @@ void SerialCom::event_callback()
         spdlog::error("Failed to read communication mask, {}", last_error());
         return;
     }
-    spdlog::debug("GetCommMask result {:04x}", dwEvtMask);
+    spdlog::debug("GetCommMask result 0x{:04x}", dwEvtMask);
+
+    /* OVERLAPPED structure is used for asynchronous I / O operations,
+       allowing you to perform I / O operations in a non - blocking manner. */
 
     /* handle for write operation*/
     OVERLAPPED oEvent = { 0 };
@@ -835,11 +869,13 @@ void SerialCom::event_callback()
 
         if (!fWaitingOnStat)
         {
+            /* Waits for an event to occur for a specified communications device */
             if (WaitCommEvent(port, &dwEvtMask, &oEvent))
             {
-                // leave event function if port is down
+                /* State recognition and port activity update*/
                 if (!comm_status(dwEvtMask))
                 {
+                    // leave event function if port is down
                     spdlog::debug("returned from eventcall");
                     return;
                 }
@@ -880,9 +916,10 @@ void SerialCom::event_callback()
                 {
                     // Status event is stored in the eventflag
                     // specified in the originalWaitCommEvent call.
-                    // leave event function if port is down
+                    /* State recognition and port activity update */
                     if (!comm_status(dwEvtMask))
                     {
+                        // leave event function if port is down
                         spdlog::debug("returned from eventcall");
                         return;
                     }
